@@ -1,0 +1,4 @@
+
+DROP INDEX idx_role_recruiter_assignments_recruiter;
+DROP INDEX idx_role_recruiter_assignments_role;
+DROP TABLE role_recruiter_assignments;

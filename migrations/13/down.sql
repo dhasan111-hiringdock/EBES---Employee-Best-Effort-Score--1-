@@ -1,0 +1,11 @@
+
+DROP INDEX idx_recruiter_client_assignments_client;
+DROP INDEX idx_recruiter_client_assignments_recruiter;
+DROP TABLE recruiter_client_assignments;
+
+DROP INDEX idx_recruiter_submissions_date;
+DROP INDEX idx_recruiter_submissions_role;
+DROP INDEX idx_recruiter_submissions_team;
+DROP INDEX idx_recruiter_submissions_client;
+DROP INDEX idx_recruiter_submissions_recruiter;
+DROP TABLE recruiter_submissions;
