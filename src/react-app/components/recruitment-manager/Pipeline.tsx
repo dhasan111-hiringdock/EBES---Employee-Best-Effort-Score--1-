@@ -226,30 +226,57 @@ export default function Pipeline() {
     }
   };
 
-  const saveRmReview = async (submissionId?: number) => {
-    if (!submissionId) return;
-    const edits = rmEdits[submissionId] || {};
-    const res = await fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
-      method: "PUT",
-      body: JSON.stringify({
-        rm_validation_status: edits.rm_validation_status ?? undefined,
-        rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
-        rm_location: edits.rm_location ?? undefined,
-        rm_work_type: edits.rm_work_type ?? undefined,
-        rm_notes: (edits as any).rm_notes ?? undefined,
-        rm_score_0_5: edits.rm_score_0_5 ?? undefined,
-        rm_review_date: (edits as any).rm_review_date ?? undefined,
-      }),
-    });
-    if (res.ok) {
-      setRmEdits((prev) => ({ ...prev, [submissionId]: { ...prev[submissionId] } }));
+  const saveRmReview = async (submissionId?: number, roleId?: number, candidateId?: number, associationId?: number) => {
+    const key = submissionId ?? associationId;
+    const edits = key != null ? (rmEdits[key] || {}) : {};
+    if (submissionId) {
+      const res = await fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
+        method: "PUT",
+        body: JSON.stringify({
+          rm_validation_status: edits.rm_validation_status ?? undefined,
+          rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
+          rm_location: edits.rm_location ?? undefined,
+          rm_work_type: edits.rm_work_type ?? undefined,
+          rm_notes: (edits as any).rm_notes ?? undefined,
+          rm_score_0_5: edits.rm_score_0_5 ?? undefined,
+          rm_review_date: (edits as any).rm_review_date ?? undefined,
+        }),
+      });
+      if (res.ok) {
+        setRmEdits((prev) => ({ ...prev, [submissionId]: { ...(prev[submissionId] || {}) } }));
+      }
+    } else if (roleId && candidateId) {
+      const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/review`, {
+        method: "PUT",
+        body: JSON.stringify({
+          rm_validation_status: edits.rm_validation_status ?? undefined,
+          rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
+          rm_location: edits.rm_location ?? undefined,
+          rm_work_type: edits.rm_work_type ?? undefined,
+          rm_notes: (edits as any).rm_notes ?? undefined,
+          rm_score_0_5: edits.rm_score_0_5 ?? undefined,
+          rm_review_date: (edits as any).rm_review_date ?? undefined,
+        }),
+      });
+      if (res.ok && roleId) {
+        const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
+        if (r.ok) {
+          const payload = await r.json();
+          setDataByRole((prev) => ({ ...prev, [roleId]: { pending_evaluation: payload.pending_evaluation || [], under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
+        }
+      } else {
+        try {
+          const err = await res.json();
+          alert((err as any)?.error || "Failed to save review");
+        } catch {
+          alert("Failed to save review");
+        }
+      }
     }
   };
 
-  const sendToAM = async (roleId: number, candidateId: number, submissionId?: number) => {
-    if (submissionId) {
-      await saveRmReview(submissionId);
-    }
+  const sendToAM = async (roleId: number, candidateId: number, submissionId?: number, associationId?: number) => {
+    await saveRmReview(submissionId, roleId, candidateId, associationId);
     const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/send-to-am`, {
       method: "POST",
     });
@@ -429,63 +456,56 @@ export default function Pipeline() {
                                     return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{unit}</span> : null;
                                   })()}
                                 </div>
-                                <input
-                                  type="date"
-                                  defaultValue={new Date().toISOString().split('T')[0]}
-                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_review_date: e.target.value } }))}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  disabled={!row.submission_id}
-                                />
-                                <input
-                                  type="text"
-                                  placeholder="Location"
-                                  defaultValue={row.rm_location || ''}
-                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_location: e.target.value } }))}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  disabled={!row.submission_id}
-                                />
-                                <select
-                                  defaultValue={row.rm_work_type || ''}
-                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_work_type: e.target.value } }))}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  disabled={!row.submission_id}
-                                >
-                                  <option value="">Contract Type</option>
-                                  <option value="SOW">SOW</option>
-                                  <option value="Payroll">Payroll</option>
-                                </select>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min={0}
-                                  max={5}
-                                  placeholder="Validation score (0–5)"
-                                  defaultValue={row.score != null ? Number(row.score) : undefined}
-                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_score_0_5: Number(e.target.value) } }))}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                  disabled={!row.submission_id}
-                                />
+                              <input
+                                type="date"
+                                defaultValue={new Date().toISOString().split('T')[0]}
+                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_review_date: e.target.value } }))}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              />
+                              <input
+                                type="text"
+                                placeholder="Location"
+                                defaultValue={row.rm_location || ''}
+                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_location: e.target.value } }))}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              />
+                              <select
+                                defaultValue={row.rm_work_type || ''}
+                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_work_type: e.target.value } }))}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              >
+                                <option value="">Contract Type</option>
+                                <option value="SOW">SOW</option>
+                                <option value="Payroll">Payroll</option>
+                              </select>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                max={5}
+                                placeholder="Validation score (0–5)"
+                                defaultValue={row.score != null ? Number(row.score) : undefined}
+                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_score_0_5: Number(e.target.value) } }))}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                              />
                               </div>
                               <textarea
                                 placeholder="Notes"
-                                defaultValue={(rmEdits[row.submission_id || 0] as any)?.rm_notes || ''}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_notes: e.target.value } }))}
+                                defaultValue={(rmEdits[(row.submission_id || row.association_id)!] as any)?.rm_notes || ''}
+                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_notes: e.target.value } }))}
                                 className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                                 rows={2}
-                                disabled={!row.submission_id}
                               />
                             </div>
                             <div className="md:col-span-3 flex md:flex-col gap-2 justify-end">
                               <button
-                                onClick={() => saveRmReview(row.submission_id)}
-                                disabled={!row.submission_id}
+                                onClick={() => saveRmReview(row.submission_id, role.id, row.candidate_id!, row.association_id)}
                                 className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
                               >
                                 Save
                               </button>
                               <button
-                                onClick={() => sendToAM(role.id, row.candidate_id!, row.submission_id)}
-                                disabled={!row.submission_id}
+                                onClick={() => sendToAM(role.id, row.candidate_id!, row.submission_id, row.association_id)}
                                 className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
                               >
                                 Send to AM
@@ -625,12 +645,22 @@ export default function Pipeline() {
                             </td>
                             <td className="py-2 px-3 text-right">
                               {row.is_discarded !== 1 ? (
-                                <button
-                                  className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
-                                  onClick={() => discardCandidate(role.id, row.candidate_id!)}
-                                >
-                                  Discard
-                                </button>
+                                <div className="flex items-center justify-end gap-2">
+                                  {row.association_status === 'rm_evaluation' && (
+                                    <button
+                                      onClick={() => sendToAM(role.id, row.candidate_id!, row.submission_id)}
+                                      className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                    >
+                                      Send to AM
+                                    </button>
+                                  )}
+                                  <button
+                                    className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                    onClick={() => discardCandidate(role.id, row.candidate_id!)}
+                                  >
+                                    Discard
+                                  </button>
+                                </div>
                               ) : (
                                 <span className="text-xs text-gray-400">—</span>
                               )}

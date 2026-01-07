@@ -317,22 +317,37 @@ export default function RMRoles() {
     }
   };
 
-  const updateReviewEdit = (submissionId: number, field: string, value: string) => {
+  const updateReviewEdit = (keyId: number, field: string, value: string) => {
     setReviewEdits(prev => ({
       ...prev,
-      [submissionId]: { ...(prev[submissionId] || {}), [field]: value }
+      [keyId]: { ...(prev[keyId] || {}), [field]: value }
     }));
   };
 
-  const saveReview = async (submissionId?: number) => {
-    if (!submissionId) return;
-    const payload = reviewEdits[submissionId] || {};
-    const res = await fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-    if (res.ok && selectedRole) {
+  const saveReview = async (submissionId?: number, roleId?: number, candidateId?: number, associationId?: number) => {
+    const key = submissionId ?? associationId;
+    const payload = key != null ? (reviewEdits[key] || {}) : {};
+    let res: Response | null = null;
+    if (submissionId) {
+      res = await fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    } else if (roleId && candidateId) {
+      res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/review`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+    }
+    if (res && res.ok && selectedRole) {
       await loadRoleSubmissions(selectedRole.id);
+    } else if (res && !res.ok) {
+      try {
+        const err = await res.json();
+        alert((err as any)?.error || 'Failed to save review');
+      } catch {
+        alert('Failed to save review');
+      }
     }
   };
 
@@ -346,10 +361,8 @@ export default function RMRoles() {
     }
   };
  
-  const sendToAM = async (roleId: number, candidateId: number, submissionId?: number) => {
-    if (submissionId) {
-      await saveReview(submissionId);
-    }
+  const sendToAM = async (roleId: number, candidateId: number, submissionId?: number, associationId?: number) => {
+    await saveReview(submissionId, roleId, candidateId, associationId);
     const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/send-to-am`, {
       method: 'POST',
       body: JSON.stringify({}),
@@ -1069,9 +1082,8 @@ export default function RMRoles() {
                                         type="text"
                                         placeholder="Validation status"
                                         defaultValue={item.rm_validation_status || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_validation_status', e.target.value)}
+                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_validation_status', e.target.value)}
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
                                       />
                                       <input
                                         type="number"
@@ -1080,9 +1092,8 @@ export default function RMRoles() {
                                         max={5}
                                         placeholder="Validation score (0-5)"
                                         defaultValue={item.cv_match_percent != null ? String(Number(item.cv_match_percent) / 20) : (item as any).score != null ? String((item as any).score) : ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_score_0_5', e.target.value)}
+                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_score_0_5', e.target.value)}
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
                                       />
                                       <div className="relative">
                                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
@@ -1090,12 +1101,11 @@ export default function RMRoles() {
                                           type="number"
                                           placeholder="Payment"
                                           defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
-                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_payment', e.target.value)}
+                                          onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_payment', e.target.value)}
                                           className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
-                                          disabled={!item.submission_id}
                                         />
                                         {(() => {
-                                          const wt = (reviewEdits[item.submission_id || 0]?.rm_work_type || item.rm_work_type || '').toLowerCase();
+                                          const wt = (reviewEdits[(item.submission_id || item.association_id)!]?.rm_work_type || item.rm_work_type || '').toLowerCase();
                                           const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
                                           return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
                                         })()}
@@ -1104,15 +1114,13 @@ export default function RMRoles() {
                                         type="text"
                                         placeholder="Location"
                                         defaultValue={item.rm_location || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_location', e.target.value)}
+                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_location', e.target.value)}
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
                                       />
                                       <select
                                         defaultValue={item.rm_work_type || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_work_type', e.target.value)}
+                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_work_type', e.target.value)}
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
                                       >
                                         <option value="">Select contract type</option>
                                         <option value="SOW">SOW</option>
@@ -1122,9 +1130,8 @@ export default function RMRoles() {
                                         type="text"
                                         placeholder="Notes"
                                         defaultValue={item.rm_notes || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_notes', e.target.value)}
+                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_notes', e.target.value)}
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2"
-                                        disabled={!item.submission_id}
                                       />
                                     </div>
                                     {item.rm_reviewed_at && (
@@ -1145,16 +1152,14 @@ export default function RMRoles() {
                                       Discard
                                     </button>
                                     <button
-                                      onClick={() => saveReview(item.submission_id)}
-                                      disabled={!item.submission_id}
+                                      onClick={() => saveReview(item.submission_id, selectedRole!.id, item.candidate_id, item.association_id)}
                                       className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
                                     >
                                       <Save className="w-4 h-4" />
                                       Save Review
                                     </button>
                                     <button
-                                      onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id)}
-                                      disabled={!item.submission_id}
+                                      onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
                                       className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50"
                                     >
                                       <User className="w-4 h-4" />
