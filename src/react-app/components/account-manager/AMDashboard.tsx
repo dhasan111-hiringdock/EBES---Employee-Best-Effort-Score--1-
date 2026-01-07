@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Target, TrendingUp, Building2, Users, AlertCircle, Clock } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
 import ScoreTooltip from '@/react-app/components/shared/ScoreTooltip';
+import { useLocation } from 'react-router';
 
 interface Client {
   id: number;
@@ -24,20 +25,31 @@ export default function AMDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [agingMetrics, setAgingMetrics] = useState<{ avg_days_open: number; roles_over_14: number; roles_over_30: number; avg_time_to_first_submission: number; avg_time_to_first_interview: number } | null>(null);
   const [agingRoles, setAgingRoles] = useState<Array<{ id: number; role_code: string; title: string; status: string; days_open: number; first_submission_days: number | null; first_interview_days: number | null; has_dropout: boolean; dropout_decision: string | null }>>([]);
+  const [dailyReport, setDailyReport] = useState<{ day_before_yesterday: any; yesterday: any } | null>(null);
+  const [newSubmissionsCount, setNewSubmissionsCount] = useState(0);
+  const location = useLocation();
+  const dailySectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     fetchDashboardData();
+    fetchNewSubmissionNotifications();
   }, []);
 
  
-
+ 
+  useEffect(() => {
+    if (!loading && dailyReport && location.pathname.endsWith('/am/daily-report')) {
+      dailySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [loading, dailyReport, location.pathname]);
   const fetchDashboardData = async () => {
     try {
-      const [ebesRes, clientsRes, dropoutsRes, agingRes] = await Promise.all([
+      const [ebesRes, clientsRes, dropoutsRes, agingRes, dailyRes] = await Promise.all([
         fetchWithAuth('/api/am/ebes-score'),
         fetchWithAuth('/api/am/client-analytics'),
         fetchWithAuth('/api/am/dropout-requests'),
-        fetchWithAuth('/api/am/aging')
+        fetchWithAuth('/api/am/aging'),
+        fetchWithAuth('/api/am/reports/daily')
       ]);
 
       if (ebesRes.ok) {
@@ -73,11 +85,34 @@ export default function AMDashboard() {
         const errorData = await agingRes.json().catch(() => ({ error: agingRes.statusText }));
         console.error('Failed to fetch aging metrics:', errorData.error);
       }
+
+      if (dailyRes.ok) {
+        const dailyData = await dailyRes.json();
+        setDailyReport(dailyData);
+      } else {
+        const errorData = await dailyRes.json().catch(() => ({ error: dailyRes.statusText }));
+        console.error('Failed to fetch daily report:', errorData.error);
+      }
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
       setError(error instanceof Error ? error.message : 'Failed to load dashboard data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchNewSubmissionNotifications = async () => {
+    try {
+      const res = await fetchWithAuth('/api/notifications?unread_only=true&limit=50');
+      if (res.ok) {
+        const items = await res.json();
+        const count = (items || []).filter(
+          (n: any) => (n as any).type === 'system' && (n as any).title === 'New Submission'
+        ).length;
+        setNewSubmissionsCount(count);
+      }
+    } catch (e) {
+      console.error('Failed to fetch new submission notifications:', e);
     }
   };
 
@@ -129,6 +164,30 @@ export default function AMDashboard() {
         <h1 className="text-3xl font-bold text-slate-800 mb-2">Dashboard</h1>
         <p className="text-slate-600">Your performance overview and client health monitoring</p>
       </div>
+
+      {newSubmissionsCount > 0 && (
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 backdrop-blur-sm rounded-lg">
+                <Target className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold mb-1">New Submissions</h3>
+                <p className="text-indigo-100">
+                  You have {newSubmissionsCount} new {newSubmissionsCount === 1 ? 'submission' : 'submissions'} awaiting your review
+                </p>
+              </div>
+            </div>
+            <a
+              href="/am/roles"
+              className="px-6 py-3 bg-white text-indigo-700 font-semibold rounded-lg hover:bg-indigo-50 transition-colors shadow-lg"
+            >
+              Review Submissions
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Pending Dropouts Alert */}
       {pendingDropouts > 0 && (
@@ -189,6 +248,61 @@ export default function AMDashboard() {
         </div>
       </div>
 
+      {dailyReport && (
+        <div ref={dailySectionRef} className="bg-white rounded-xl shadow-sm border border-slate-200">
+          <div className="p-6 border-b border-slate-200">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+              Daily Report
+            </h2>
+            <p className="text-sm text-slate-600 mt-1">Yesterday vs day before yesterday</p>
+          </div>
+          <div className="p-6 overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead>
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-600">Metric</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-600">Yesterday</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-600">Day Before</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {[
+                  { key: 'roles_created', label: 'Roles Created' },
+                  { key: 'submissions', label: 'Submissions' },
+                  { key: 'forwarded_to_client', label: 'Forwarded to Client' },
+                  { key: 'client_rejected', label: 'Client Rejected' },
+                  { key: 'interviews', label: 'Interviews' },
+                  { key: 'deals', label: 'Deals' },
+                  { key: 'discarded', label: 'Discarded Candidates' },
+                ].map((row) => (
+                  <tr key={row.key}>
+                    <td className="px-4 py-2 text-sm text-slate-700">{row.label}</td>
+                    <td className="px-4 py-2 text-sm font-semibold text-slate-900">{(dailyReport as any).yesterday?.[row.key] ?? 0}</td>
+                    <td className="px-4 py-2 text-sm text-slate-700">{(dailyReport as any).day_before_yesterday?.[row.key] ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-4">
+              <div className="text-sm text-slate-700 font-semibold mb-2">Role Status Changes</div>
+              <div className="grid grid-cols-5 gap-3">
+                {[
+                  { key: 'deal', label: 'Deal' },
+                  { key: 'lost', label: 'Lost' },
+                  { key: 'on_hold', label: 'On Hold' },
+                  { key: 'cancelled', label: 'Cancelled' },
+                  { key: 'no_answer', label: 'No Answer' },
+                ].map((s) => (
+                  <div key={s.key} className="bg-slate-50 rounded-lg p-3 text-center">
+                    <div className="text-xs text-slate-500 mb-1">{s.label}</div>
+                    <div className="text-lg font-bold text-slate-800">{(dailyReport as any).yesterday?.role_status_changes?.[s.key] ?? 0}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Client Health Overview */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200">
         <div className="p-6 border-b border-slate-200">

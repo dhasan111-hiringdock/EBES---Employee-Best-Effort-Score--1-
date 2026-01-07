@@ -18,6 +18,7 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [snoozeSelection, setSnoozeSelection] = useState<Record<number, number>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -120,6 +121,42 @@ export default function NotificationBell() {
       }
     } catch (error) {
       console.error('Failed to delete notification:', error);
+    }
+  };
+
+  const snoozeAssociation = async (notification: Notification) => {
+    if (!notification.related_entity_type || !notification.related_entity_id) return;
+    const days = snoozeSelection[notification.id] || 7;
+    try {
+      const response = await fetchWithAuth(`/api/recruiter/stale-notifications/${notification.related_entity_id}/snooze`, {
+        method: 'POST',
+        body: JSON.stringify({ days })
+      });
+      if (response.ok) {
+        setNotifications(prev =>
+          prev.map(n => n.id === notification.id ? { ...n, is_read: true } : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - (notification.is_read ? 0 : 1)));
+      }
+    } catch (error) {
+      console.error('Failed to snooze reminder:', error);
+    }
+  };
+
+  const disableAssociationReminders = async (notification: Notification) => {
+    if (!notification.related_entity_type || !notification.related_entity_id) return;
+    try {
+      const response = await fetchWithAuth(`/api/recruiter/stale-notifications/${notification.related_entity_id}/disable`, {
+        method: 'POST'
+      });
+      if (response.ok) {
+        setNotifications(prev =>
+          prev.map(n => n.id === notification.id ? { ...n, is_read: true } : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - (notification.is_read ? 0 : 1)));
+      }
+    } catch (error) {
+      console.error('Failed to disable reminders:', error);
     }
   };
 
@@ -229,16 +266,45 @@ export default function NotificationBell() {
                         <p className="text-sm text-slate-600 mb-2">
                           {notification.message}
                         </p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-400">
-                            {formatTime(notification.created_at)}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {!notification.is_read && (
-                              <button
-                                onClick={() => markAsRead(notification.id)}
-                                className="text-indigo-600 hover:text-indigo-700"
-                                title="Mark as read"
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">
+                    {formatTime(notification.created_at)}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {notification.related_entity_type === 'candidate_role_association' && notification.type === 'system' && (
+                      <>
+                        <select
+                          value={snoozeSelection[notification.id] ?? 7}
+                          onChange={(e) => setSnoozeSelection(prev => ({ ...prev, [notification.id]: parseInt(e.target.value) }))}
+                          className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-600"
+                          title="Remind me in"
+                        >
+                          <option value={3}>3d</option>
+                          <option value={7}>7d</option>
+                          <option value={14}>14d</option>
+                          <option value={30}>30d</option>
+                        </select>
+                        <button
+                          onClick={() => snoozeAssociation(notification)}
+                          className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                          title="Snooze"
+                        >
+                          Snooze
+                        </button>
+                        <button
+                          onClick={() => disableAssociationReminders(notification)}
+                          className="text-xs text-slate-500 hover:text-red-600"
+                          title="Turn off reminders"
+                        >
+                          Turn off
+                        </button>
+                      </>
+                    )}
+                    {!notification.is_read && (
+                      <button
+                        onClick={() => markAsRead(notification.id)}
+                        className="text-indigo-600 hover:text-indigo-700"
+                        title="Mark as read"
                               >
                                 <Check className="w-4 h-4" />
                               </button>

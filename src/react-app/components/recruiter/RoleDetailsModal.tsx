@@ -29,23 +29,21 @@ export default function RoleDetailsModal({ role, onClose }: RoleDetailsModalProp
 
   const getStatusConfig = (status: string) => {
     const configs: { [key: string]: { color: string; bg: string; label: string } } = {
-      open: { color: 'text-green-700', bg: 'bg-green-50 border-green-200', label: 'Open' },
-      closed: { color: 'text-red-700', bg: 'bg-red-50 border-red-200', label: 'Closed' },
-      'on hold': { color: 'text-yellow-700', bg: 'bg-yellow-50 border-yellow-200', label: 'On Hold' },
       active: { color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200', label: 'Active' },
-      deal: { color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200', label: 'Deal Closed' },
+      deal: { color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200', label: 'Deal' },
       lost: { color: 'text-red-700', bg: 'bg-red-50 border-red-200', label: 'Lost' },
       on_hold: { color: 'text-yellow-700', bg: 'bg-yellow-50 border-yellow-200', label: 'On Hold' },
+      cancelled: { color: 'text-gray-700', bg: 'bg-gray-50 border-gray-200', label: 'Cancelled' },
       no_answer: { color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200', label: 'No Answer' },
     };
-    return configs[status] || configs.open;
+    return configs[status] || configs.active;
   };
 
   const statusConfig = getStatusConfig(role.status);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col">
         {/* Modal Header */}
         <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-indigo-700 px-8 py-6 flex items-center justify-between text-white z-10">
           <div>
@@ -61,7 +59,7 @@ export default function RoleDetailsModal({ role, onClose }: RoleDetailsModalProp
         </div>
         
         {/* Modal Body */}
-        <div className="p-8 overflow-y-auto max-h-[calc(90vh-120px)]">
+        <div className="p-8 overflow-y-auto h-[calc(90vh-120px)]">
           <div className="space-y-6">
             {/* Status Badge */}
             <div>

@@ -316,6 +316,71 @@ app.get("/api/recruiter/deal-roles", recruiterOnly, async (c) => {
   }
 });
 
+// Get candidates associated with a role for the current recruiter
+app.get("/api/recruiter/roles/:roleId/candidates", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  const roleId = c.req.param("roleId");
+
+  try {
+    const { results } = await db
+      .prepare(`
+        SELECT 
+          c.id as candidate_id,
+          c.candidate_code,
+          c.name as candidate_name,
+          cra.status as association_status
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        WHERE cra.role_id = ? AND cra.recruiter_user_id = ? AND cra.is_discarded = 0
+        ORDER BY c.name ASC
+      `)
+      .bind(roleId, (recruiterUser as any).id)
+      .all();
+
+    return c.json(results || []);
+  } catch (error) {
+    console.error("Error fetching role candidates:", error);
+    return c.json({ error: "Failed to fetch role candidates" }, 500);
+  }
+});
+
+// Mark deal for a specific candidate-role association (recruiter-owned)
+app.post("/api/recruiter/roles/:roleId/candidates/:candidateId/deal", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  const roleId = c.req.param("roleId");
+  const candidateId = c.req.param("candidateId");
+
+  try {
+    const assoc = await db
+      .prepare(`
+        SELECT id FROM candidate_role_associations
+        WHERE role_id = ? AND candidate_id = ? AND recruiter_user_id = ? AND is_discarded = 0
+      `)
+      .bind(roleId, candidateId, (recruiterUser as any).id)
+      .first();
+    if (!assoc) {
+      return c.json({ error: "Association not found" }, 404);
+    }
+
+    await db
+      .prepare(`
+        UPDATE candidate_role_associations
+        SET status = 'deal',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE role_id = ? AND candidate_id = ? AND recruiter_user_id = ?
+      `)
+      .bind(roleId, candidateId, (recruiterUser as any).id)
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error marking candidate deal:", error);
+    return c.json({ error: "Failed to mark candidate deal" }, 500);
+  }
+});
+
 // Create submission
 app.post("/api/recruiter/submissions", recruiterOnly, async (c) => {
   const db = c.env.DB;
@@ -345,6 +410,9 @@ app.post("/api/recruiter/submissions", recruiterOnly, async (c) => {
 
     // Handle different entry types
     const entryType = data.entry_type || "submission";
+    if ((entryType === "submission" || entryType === "interview") && (!data.candidate_name || data.candidate_name.trim().length === 0)) {
+      return c.json({ error: "Candidate name is required" }, 400);
+    }
     let roleId = data.role_id;
     let clientId = data.client_id;
     let teamId = data.team_id;
@@ -555,6 +623,16 @@ app.post("/api/recruiter/submissions", recruiterOnly, async (c) => {
             type: 'system',
             title: 'Submission Received',
             message: `New candidate submission for role ${roleTitle || String(roleId)} requires RM evaluation.`,
+            relatedEntityType: 'role',
+            relatedEntityId: Number(roleId)
+          });
+        }
+        if (accountManagerId) {
+          await createNotification(db, {
+            userId: accountManagerId,
+            type: 'system',
+            title: 'New Submission',
+            message: `New candidate submission for role ${roleTitle || String(roleId)} has been added.`,
             relatedEntityType: 'role',
             relatedEntityId: Number(roleId)
           });
@@ -926,6 +1004,7 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
   const dateRange = c.req.query("date_range") || "";
   const startDate = c.req.query("start_date");
   const endDate = c.req.query("end_date");
+  const teamId = c.req.query("team_id");
 
   try {
     // Build date filter
@@ -969,6 +1048,10 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
     if (roleId) {
       query += " AND rs.role_id = ?";
       params.push(parseInt(roleId));
+    }
+    if (teamId) {
+      query += " AND rs.team_id = ?";
+      params.push(parseInt(String(teamId)));
     }
     if (entryType) {
       query += " AND rs.entry_type = ?";
@@ -1018,12 +1101,13 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
         SELECT c.name as client_name, COUNT(*) as count
         FROM recruiter_submissions rs
         INNER JOIN clients c ON rs.client_id = c.id
-        WHERE rs.recruiter_user_id = ? ${roleId ? "AND rs.role_id = ?" : ""} ${entryType ? "AND rs.entry_type = ?" : ""} ${dateFilter}
+        WHERE rs.recruiter_user_id = ? ${teamId ? "AND rs.team_id = ?" : ""} ${roleId ? "AND rs.role_id = ?" : ""} ${entryType ? "AND rs.entry_type = ?" : ""} ${dateFilter}
         GROUP BY c.id, c.name
         ORDER BY count DESC
       `)
       .bind(...[
         (recruiterUser as any).id,
+        ...(teamId ? [parseInt(String(teamId))] : []),
         ...(roleId ? [parseInt(roleId)] : []),
         ...(entryType ? [entryType] : []),
         ...dateParams
@@ -1036,13 +1120,14 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
         SELECT t.name as team_name, COUNT(*) as count
         FROM recruiter_submissions rs
         INNER JOIN app_teams t ON rs.team_id = t.id
-        WHERE rs.recruiter_user_id = ? ${clientId ? "AND rs.client_id = ?" : ""} ${roleId ? "AND rs.role_id = ?" : ""} ${entryType ? "AND rs.entry_type = ?" : ""} ${dateFilter}
+        WHERE rs.recruiter_user_id = ? ${clientId ? "AND rs.client_id = ?" : ""} ${teamId ? "AND rs.team_id = ?" : ""} ${roleId ? "AND rs.role_id = ?" : ""} ${entryType ? "AND rs.entry_type = ?" : ""} ${dateFilter}
         GROUP BY t.id, t.name
         ORDER BY count DESC
       `)
       .bind(...[
         (recruiterUser as any).id,
         ...(clientId ? [parseInt(clientId)] : []),
+        ...(teamId ? [parseInt(String(teamId))] : []),
         ...(roleId ? [parseInt(roleId)] : []),
         ...(entryType ? [entryType] : []),
         ...dateParams
@@ -1056,6 +1141,7 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
         FROM recruiter_submissions rs
         WHERE rs.recruiter_user_id = ? 
           ${clientId ? "AND rs.client_id = ?" : ""}
+          ${teamId ? "AND rs.team_id = ?" : ""}
           ${roleId ? "AND rs.role_id = ?" : ""}
           ${entryType ? "AND rs.entry_type = ?" : ""}
           AND rs.submission_date >= date('now', '-30 days')
@@ -1066,6 +1152,7 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
       .bind(...[
         (recruiterUser as any).id,
         ...(clientId ? [parseInt(clientId)] : []),
+        ...(teamId ? [parseInt(String(teamId))] : []),
         ...(roleId ? [parseInt(roleId)] : []),
         ...(entryType ? [entryType] : [])
       ].filter(p => p !== undefined))
@@ -1078,6 +1165,7 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
         FROM recruiter_submissions rs
         WHERE rs.recruiter_user_id = ? 
           ${clientId ? "AND rs.client_id = ?" : ""}
+          ${teamId ? "AND rs.team_id = ?" : ""}
           ${roleId ? "AND rs.role_id = ?" : ""}
           ${entryType ? "AND rs.entry_type = ?" : ""}
           AND rs.submission_date >= date('now', '-12 months')
@@ -1088,6 +1176,7 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
       .bind(...[
         (recruiterUser as any).id,
         ...(clientId ? [parseInt(clientId)] : []),
+        ...(teamId ? [parseInt(String(teamId))] : []),
         ...(roleId ? [parseInt(roleId)] : []),
         ...(entryType ? [entryType] : [])
       ].filter(p => p !== undefined))
@@ -1121,6 +1210,8 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
   const recruiterUser = c.get("recruiterUser");
   const isActive = c.req.query("is_active");
   const searchQuery = c.req.query("search");
+  const clientId = c.req.query("client_id");
+  const teamId = c.req.query("team_id");
 
   try {
     let query = `
@@ -1135,7 +1226,20 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
         COUNT(DISTINCT CASE WHEN cra.is_discarded = 0 THEN cra.candidate_id END) as total_candidates,
         COUNT(DISTINCT CASE WHEN cra.is_discarded = 0 THEN cra.candidate_id END) as active_candidates,
         COUNT(DISTINCT CASE WHEN cra.is_discarded = 1 THEN cra.candidate_id END) as discarded_candidates,
-        COUNT(DISTINCT CASE WHEN rs.entry_type = 'submission' AND cra.is_discarded = 0 THEN cra.candidate_id END) as in_play_submissions
+        COUNT(DISTINCT CASE WHEN rs.entry_type = 'submission' AND cra.is_discarded = 0 THEN cra.candidate_id END) as in_play_submissions,
+        SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_submitted,
+        SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected,
+        CAST(julianday('now') - julianday(r.created_at) AS INTEGER) as days_open,
+        (
+          SELECT CAST(julianday(MIN(rs2.submission_date)) - julianday(r.created_at) AS INTEGER)
+          FROM recruiter_submissions rs2
+          WHERE rs2.role_id = r.id AND rs2.entry_type = 'submission'
+        ) as first_submission_days,
+        (
+          SELECT CAST(julianday(MIN(rs3.submission_date)) - julianday(r.created_at) AS INTEGER)
+          FROM recruiter_submissions rs3
+          WHERE rs3.role_id = r.id AND rs3.entry_type = 'interview'
+        ) as first_interview_days
       FROM am_roles r
       INNER JOIN clients c ON r.client_id = c.id
       INNER JOIN app_teams t ON r.team_id = t.id
@@ -1158,6 +1262,16 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
     if (searchQuery) {
       query += ` AND (r.title LIKE ? OR r.role_code LIKE ?)`;
       params.push(`%${searchQuery}%`, `%${searchQuery}%`);
+    }
+
+    if (clientId) {
+      query += ` AND r.client_id = ?`;
+      params.push(parseInt(String(clientId)));
+    }
+
+    if (teamId) {
+      query += ` AND r.team_id = ?`;
+      params.push(parseInt(String(teamId)));
     }
 
     query += ` GROUP BY r.id ORDER BY r.created_at DESC`;

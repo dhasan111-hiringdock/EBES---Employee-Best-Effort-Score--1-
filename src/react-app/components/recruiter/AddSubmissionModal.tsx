@@ -141,6 +141,10 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
 
   const submitEntry = async () => {
     if (!selectedRole || !client || !entryType) return false;
+    if (!candidateName.trim()) {
+      setSubmissionError('Candidate name is required');
+      return false;
+    }
 
     try {
       const baseData: any = {
@@ -149,12 +153,9 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
         role_id: selectedRole.id,
         submission_date: submissionDate,
         notes,
+        candidate_name: candidateName.trim(),
       };
       
-      // Only add candidate fields if they have values
-      if (candidateName.trim()) {
-        baseData.candidate_name = candidateName.trim();
-      }
       if (candidateEmail.trim()) {
         baseData.candidate_email = candidateEmail.trim();
       }
@@ -617,7 +618,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                   <>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Candidate Name (Optional)
+                        Candidate Name *
                       </label>
                       <input
                         type="text"
@@ -626,6 +627,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                           setCandidateName(e.target.value);
                           setSelectedCandidateId(null);
                         }}
+                        required
                         className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                         placeholder="Enter candidate's name..."
                       />
@@ -793,7 +795,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                   <button
                     type="button"
                     onClick={handleSubmitAndAddAnother}
-                    disabled={submitting || !entryType}
+                    disabled={submitting || !entryType || !candidateName.trim()}
                     className="flex-1 px-6 py-3 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     <Plus className="w-5 h-5" />
@@ -802,7 +804,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                   <button
                     type="button"
                     onClick={handleSubmit}
-                    disabled={submitting || !entryType}
+                    disabled={submitting || !entryType || !candidateName.trim()}
                     className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                   >
                     {submitting ? "Submitting..." : "Submit & Close"}

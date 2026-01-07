@@ -24,7 +24,7 @@ interface Role {
   total_interviews: number;
   total_submissions: number;
   under_client_evaluation?: number;
-  submitted_to_client?: number;
+  client_rejected?: number;
   has_dropout?: boolean;
   dropout_decision?: string;
 }
@@ -67,7 +67,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
               if (s === 'submitted') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Submitted to AM</span>;
               if (s === 'client_submitted') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>;
               if (s === 'client_rejected') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>;
-              if (s === 'rm_evaluation') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Pending RM evaluation</span>;
+              if (s === 'rm_evaluation') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Pending Evaluation</span>;
               return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>;
             })()}
           </div>
@@ -96,7 +96,17 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
             </div>
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
               <p className="text-xs text-gray-600">Current Status</p>
-              <p className="text-sm font-medium text-gray-900">{item.association_status || 'submitted'}</p>
+              <p className="text-sm font-medium text-gray-900">
+                {(() => {
+                  const s = item.association_status || 'submitted';
+                  if (s === 'rm_evaluation') return 'Pending Evaluation';
+                  if (s === 'submitted') return 'Submitted to AM';
+                  if (s === 'client_submitted') return 'Submitted to Client';
+                  if (s === 'client_rejected') return 'Client Rejected';
+                  if (s === 'deal') return 'Deal';
+                  return 'In Play';
+                })()}
+              </p>
             </div>
           </div>
           {item.candidate_resume_url && (
@@ -122,7 +132,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
             <div className="flex items-center gap-2">
               <select defaultValue="" onChange={(e) => { const v = e.target.value; if (!v || !submissionsRole) return; const roleId = submissionsRole.id; if (item.association_status === 'client_submitted') { if (v === 'client_reject') clientReject(roleId, item.candidate_id); else if (v === 'pull_out') pullOut(roleId, item.candidate_id); else if (v === 'deal') markDeal(roleId, item.candidate_id); } else { if (v === 'submit_to_client') submitToClient(roleId, item.candidate_id); else if (v === 'reject') discardCandidate(roleId, item.candidate_id); } e.currentTarget.value = ''; }} className="px-3 py-2 text-sm border border-gray-300 rounded-lg">
                 <option value="" disabled>Choose Action</option>
-                {item.association_status === 'client_submitted' ? (<><option value="client_reject">Discard By Client</option><option value="pull_out">Pull Out</option><option value="deal">Deal</option></>) : (<><option value="submit_to_client">Submit to Client</option><option value="reject">Discard</option></>)}
+                {item.association_status === 'client_submitted' ? (<><option value="client_reject">Client Rejected</option><option value="pull_out">Pull Out</option><option value="deal">Deal</option></>) : (<><option value="submit_to_client">Submit to Client</option><option value="reject">Discard</option></>)}
               </select>
             </div>
           )}
@@ -550,12 +560,12 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
                       <p className="text-2xl font-bold text-indigo-600">{submissionsRole.total_submissions ?? 0}</p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-                      <p className="text-xs text-blue-700 mb-1 font-semibold">Under Evaluation</p>
+                      <p className="text-xs text-blue-700 mb-1 font-semibold">Submitted to Client</p>
                       <p className="text-2xl font-bold text-blue-600">{submissionsRole.under_client_evaluation ?? 0}</p>
                     </div>
                     <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                      <p className="text-xs text-gray-700 mb-1 font-semibold">Submitted to Client</p>
-                      <p className="text-2xl font-bold text-gray-900">{submissionsRole.submitted_to_client ?? 0}</p>
+                      <p className="text-xs text-gray-700 mb-1 font-semibold">Client Rejected</p>
+                      <p className="text-2xl font-bold text-gray-900">{submissionsRole.client_rejected ?? 0}</p>
                     </div>
                   </div>
                 </div>

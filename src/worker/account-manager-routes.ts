@@ -28,6 +28,28 @@ const amOnly = async (c: any, next: any) => {
   await next();
 };
 
+// Pending submissions count for AM (awaiting AM review)
+app.get("/api/am/pending-submissions-count", amOnly, async (c) => {
+  const db = c.env.DB;
+  const amUser = c.get("amUser");
+  try {
+    const row = await db
+      .prepare(`
+        SELECT COUNT(*) as count
+        FROM candidate_role_associations cra
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        WHERE cra.status = 'submitted'
+          AND cra.is_discarded = 0
+          AND r.account_manager_id = ?
+      `)
+      .bind((amUser as any).id)
+      .first();
+    return c.json({ count: (row as any)?.count || 0 });
+  } catch (error) {
+    return c.json({ error: "Failed to fetch pending submissions count" }, 500);
+  }
+});
+
 // Generate role code
 async function generateRoleCode(db: any): Promise<string> {
   const counter = await db
@@ -228,7 +250,7 @@ app.get("/api/am/roles", amOnly, async (c) => {
           .prepare(`
             SELECT 
               SUM(CASE WHEN status = 'client_submitted' AND is_discarded = 0 THEN 1 ELSE 0 END) as under_client_evaluation,
-              SUM(CASE WHEN status = 'client_rejected' AND is_discarded = 0 THEN 1 ELSE 0 END) as submitted_to_client
+              SUM(CASE WHEN status = 'client_rejected' AND is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected
             FROM candidate_role_associations
             WHERE role_id = ?
           `)
@@ -243,7 +265,7 @@ app.get("/api/am/roles", amOnly, async (c) => {
           total_interviews: interviewMap[1] + interviewMap[2] + interviewMap[3],
           total_submissions: (totalSubsRow as any)?.total || 0,
           under_client_evaluation: (clientStatusCounts as any)?.under_client_evaluation || 0,
-          submitted_to_client: (clientStatusCounts as any)?.submitted_to_client || 0,
+          client_rejected: (clientStatusCounts as any)?.client_rejected || 0,
           has_pending_dropout: !!pendingStatus,
           pending_dropout_reason: pendingStatus ? (pendingStatus as any).reason : null,
           has_dropout: !!dropoutRequest,
@@ -1877,6 +1899,55 @@ app.put("/api/am/submissions/:id/review", amOnly, async (c) => {
   `).bind(body.am_notes || null, id).run();
 
   return c.json({ success: true });
+});
+
+// AM daily custom report
+app.get("/api/am/reports/daily", amOnly, async (c) => {
+  const db = c.env.DB;
+  const amUser = c.get("amUser");
+
+  const countsFor = async (offset: string) => {
+    const rolesCreated = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE account_manager_id = ? AND DATE(created_at) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const submissions = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations cra INNER JOIN am_roles ar ON cra.role_id = ar.id WHERE ar.account_manager_id = ? AND cra.is_discarded = 0 AND DATE(cra.submission_date) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const forwardedToClient = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations cra INNER JOIN am_roles ar ON cra.role_id = ar.id WHERE ar.account_manager_id = ? AND cra.status = 'client_submitted' AND cra.is_discarded = 0 AND DATE(cra.updated_at) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const clientRejected = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations cra INNER JOIN am_roles ar ON cra.role_id = ar.id WHERE ar.account_manager_id = ? AND cra.status = 'client_rejected' AND cra.is_discarded = 0 AND DATE(cra.updated_at) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const deals = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations cra INNER JOIN am_roles ar ON cra.role_id = ar.id WHERE ar.account_manager_id = ? AND cra.status = 'deal' AND DATE(cra.updated_at) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const discarded = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations cra INNER JOIN am_roles ar ON cra.role_id = ar.id WHERE ar.account_manager_id = ? AND cra.is_discarded = 1 AND DATE(cra.discarded_at) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const interviews = await db.prepare(`SELECT COUNT(*) as c FROM recruiter_submissions rs INNER JOIN am_roles ar ON rs.role_id = ar.id WHERE ar.account_manager_id = ? AND rs.entry_type = 'interview' AND DATE(rs.submission_date) = DATE('now', ?)`)
+      .bind((amUser as any).id, offset).first();
+    const rolesStatusDeal = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE account_manager_id = ? AND status = 'deal' AND DATE(updated_at) = DATE('now', ?)`).bind((amUser as any).id, offset).first();
+    const rolesStatusLost = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE account_manager_id = ? AND status = 'lost' AND DATE(updated_at) = DATE('now', ?)`).bind((amUser as any).id, offset).first();
+    const rolesStatusOnHold = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE account_manager_id = ? AND status = 'on_hold' AND DATE(updated_at) = DATE('now', ?)`).bind((amUser as any).id, offset).first();
+    const rolesStatusCancelled = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE account_manager_id = ? AND status = 'cancelled' AND DATE(updated_at) = DATE('now', ?)`).bind((amUser as any).id, offset).first();
+    const rolesStatusNoAnswer = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE account_manager_id = ? AND status = 'no_answer' AND DATE(updated_at) = DATE('now', ?)`).bind((amUser as any).id, offset).first();
+
+    return {
+      roles_created: Number((rolesCreated as any)?.c || 0),
+      submissions: Number((submissions as any)?.c || 0),
+      forwarded_to_client: Number((forwardedToClient as any)?.c || 0),
+      client_rejected: Number((clientRejected as any)?.c || 0),
+      interviews: Number((interviews as any)?.c || 0),
+      deals: Number((deals as any)?.c || 0),
+      discarded: Number((discarded as any)?.c || 0),
+      role_status_changes: {
+        deal: Number((rolesStatusDeal as any)?.c || 0),
+        lost: Number((rolesStatusLost as any)?.c || 0),
+        on_hold: Number((rolesStatusOnHold as any)?.c || 0),
+        cancelled: Number((rolesStatusCancelled as any)?.c || 0),
+        no_answer: Number((rolesStatusNoAnswer as any)?.c || 0)
+      }
+    };
+  };
+
+  const day_before_yesterday = await countsFor("-2 day");
+  const yesterday = await countsFor("-1 day");
+  return c.json({ day_before_yesterday, yesterday });
 });
 
 export default app;

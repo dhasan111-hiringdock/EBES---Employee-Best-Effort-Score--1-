@@ -17,5 +17,8 @@
       "database_name": "ebes-db",
       "database_id": "db348f18-784f-4ccc-928a-25a27056a14e"
     }
-  ]
+  ],
+  "triggers": {
+    "crons": ["0 9 * * *"]
+  }
 }

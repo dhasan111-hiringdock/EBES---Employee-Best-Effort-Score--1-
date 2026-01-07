@@ -14,10 +14,12 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
   const { user, logout } = useAuth();
   const [showCompanyPage, setShowCompanyPage] = useState(true);
   const [pendingDropoutsCount, setPendingDropoutsCount] = useState(0);
+  const [pendingSubmissionsCount, setPendingSubmissionsCount] = useState(0);
 
   useEffect(() => {
     fetchCompanySettings();
     fetchPendingDropouts();
+    fetchPendingSubmissions();
   }, []);
 
   const fetchCompanySettings = async () => {
@@ -41,6 +43,18 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
       }
     } catch (error) {
       console.error('Failed to fetch pending dropouts:', error);
+    }
+  };
+
+  const fetchPendingSubmissions = async () => {
+    try {
+      const response = await fetchWithAuth('/api/rm/pending-submissions-count');
+      if (response.ok) {
+        const data = await response.json();
+        setPendingSubmissionsCount(data.count || 0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pending submissions count:', error);
     }
   };
 
@@ -92,6 +106,7 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             const isDropoutTab = item.path === "/rm/dropouts";
+            const isRolesTab = item.path === "/rm/roles";
             
             return (
               <Link
@@ -112,6 +127,11 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
                 {isDropoutTab && pendingDropoutsCount > 0 && (
                   <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] text-center">
                     {pendingDropoutsCount}
+                  </span>
+                )}
+                {isRolesTab && pendingSubmissionsCount > 0 && (
+                  <span className="ml-auto px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full min-w-[20px] text-center">
+                    {pendingSubmissionsCount}
                   </span>
                 )}
               </Link>

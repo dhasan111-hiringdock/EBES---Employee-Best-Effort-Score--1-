@@ -47,6 +47,7 @@ export default function RecruiterAnalytics() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [teams, setTeams] = useState<Array<{ id: number; name: string; team_code: string }>>([]);
   const [selectedClient, setSelectedClient] = useState<string>('');
+  const [selectedTeam, setSelectedTeam] = useState<string>('');
   const [selectedRole, setSelectedRole] = useState<string>('');
   const [selectedEntryType, setSelectedEntryType] = useState<string>('');
   const [dateRange, setDateRange] = useState<string>('this_month');
@@ -64,11 +65,48 @@ export default function RecruiterAnalytics() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem('recruiterAnalyticsFilters');
+      if (saved) {
+        const f = JSON.parse(saved);
+        if (typeof f.selectedClient === 'string') setSelectedClient(f.selectedClient);
+        if (typeof f.selectedTeam === 'string') setSelectedTeam(f.selectedTeam);
+        if (typeof f.selectedRole === 'string') setSelectedRole(f.selectedRole);
+        if (typeof f.selectedEntryType === 'string') setSelectedEntryType(f.selectedEntryType);
+        if (typeof f.dateRange === 'string') setDateRange(f.dateRange);
+        if (typeof f.customStartDate === 'string') setCustomStartDate(f.customStartDate);
+        if (typeof f.customEndDate === 'string') setCustomEndDate(f.customEndDate);
+        if (typeof f.ebesDateFilter === 'string') setEbesDateFilter(f.ebesDateFilter);
+        if (typeof f.ebesCustomStart === 'string') setEbesCustomStart(f.ebesCustomStart);
+        if (typeof f.ebesCustomEnd === 'string') setEbesCustomEnd(f.ebesCustomEnd);
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      const payload = {
+        selectedClient,
+        selectedTeam,
+        selectedRole,
+        selectedEntryType,
+        dateRange,
+        customStartDate,
+        customEndDate,
+        ebesDateFilter,
+        ebesCustomStart,
+        ebesCustomEnd
+      };
+      localStorage.setItem('recruiterAnalyticsFilters', JSON.stringify(payload));
+    } catch {}
+  }, [selectedClient, selectedTeam, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate, ebesDateFilter, ebesCustomStart, ebesCustomEnd]);
+
+  useEffect(() => {
     if (!loading) {
       fetchAnalytics();
       fetchEBESScore();
     }
-  }, [loading, selectedClient, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate, ebesDateFilter, ebesCustomStart, ebesCustomEnd]);
+  }, [loading, selectedClient, selectedTeam, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate, ebesDateFilter, ebesCustomStart, ebesCustomEnd]);
 
   const fetchInitialData = async () => {
     try {
@@ -109,6 +147,7 @@ export default function RecruiterAnalytics() {
     try {
       const params = new URLSearchParams();
       if (selectedClient) params.append('client_id', selectedClient);
+      if (selectedTeam) params.append('team_id', selectedTeam);
       if (selectedRole) params.append('role_id', selectedRole);
       if (selectedEntryType) params.append('entry_type', selectedEntryType);
       if (dateRange) params.append('date_range', dateRange);
@@ -134,6 +173,7 @@ export default function RecruiterAnalytics() {
 
     const params = new URLSearchParams();
     if (filters.clientId && filters.clientId !== 'all') params.append('client_id', filters.clientId);
+    if (filters.teamId && filters.teamId !== 'all') params.append('team_id', filters.teamId);
     if (selectedRole) params.append('role_id', selectedRole);
     if (selectedEntryType) params.append('entry_type', selectedEntryType);
     if (filters.dateRange && filters.dateRange !== 'all') {
@@ -336,6 +376,7 @@ export default function RecruiterAnalytics() {
 
   const clearFilters = () => {
     setSelectedClient('');
+    setSelectedTeam('');
     setSelectedRole('');
     setSelectedEntryType('');
     setDateRange('this_month');
@@ -445,6 +486,34 @@ export default function RecruiterAnalytics() {
             <div className={`inline-block px-4 py-2 rounded-lg bg-gradient-to-r ${getPerformanceColor(ebesData?.performance_label || 'Average')} text-white font-semibold`}>
               {ebesData?.performance_label || 'No Data'}
             </div>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {(() => {
+                const b = (ebesData as any)?.breakdown?.table1 || {};
+                const s6 = b.submission6h || 0;
+                const s24 = b.submission24h || 0;
+                const safter = b.submissionAfter24h || 0;
+                const total = s6 + s24 + safter;
+                const pct6 = total > 0 ? Math.round((s6 / total) * 1000) / 10 : 0;
+                const pct24 = total > 0 ? Math.round((s24 / total) * 1000) / 10 : 0;
+                const pctafter = total > 0 ? Math.round((safter / total) * 1000) / 10 : 0;
+                return (
+                  <>
+                    <div className="bg-white/20 rounded-lg p-3 text-white">
+                      <div className="text-xs">6h Submissions</div>
+                      <div className="text-lg font-bold">{pct6}%</div>
+                    </div>
+                    <div className="bg-white/20 rounded-lg p-3 text-white">
+                      <div className="text-xs">24h Submissions</div>
+                      <div className="text-lg font-bold">{pct24}%</div>
+                    </div>
+                    <div className="bg-white/20 rounded-lg p-3 text-white">
+                      <div className="text-xs">After 24h</div>
+                      <div className="text-lg font-bold">{pctafter}%</div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           </div>
           <div className="w-32 h-32 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center">
             <Target className="w-16 h-16 text-white" />
@@ -479,6 +548,19 @@ export default function RecruiterAnalytics() {
               <option value="">All Clients</option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>{client.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Team</label>
+            <select
+              value={selectedTeam}
+              onChange={(e) => setSelectedTeam(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Teams</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>{team.name}</option>
               ))}
             </select>
           </div>
@@ -1219,7 +1301,23 @@ export default function RecruiterAnalytics() {
                 <YAxis stroke="#64748b" />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="count" fill="#8b5cf6" name="Total Activity" radius={[8, 8, 0, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="#8b5cf6"
+                  name="Total Activity"
+                  radius={[8, 8, 0, 0]}
+                  onClick={(data: any) => {
+                    const m = data?.month as string;
+                    if (!m || !/^\d{4}-\d{2}$/.test(m)) return;
+                    const [y, mo] = m.split('-').map((x) => parseInt(x));
+                    const start = new Date(y, mo - 1, 1);
+                    const end = new Date(y, mo, 0);
+                    const fmt = (d: Date) => d.toISOString().split('T')[0];
+                    setDateRange('custom');
+                    setCustomStartDate(fmt(start));
+                    setCustomEndDate(fmt(end));
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -1254,7 +1352,14 @@ export default function RecruiterAnalytics() {
                                           successRate > 5 ? 'text-orange-600 bg-orange-50' : 'text-red-600 bg-red-50';
                   
                   return (
-                    <tr key={index} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={index}
+                      className="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                      onClick={() => {
+                        const found = clients.find((c) => c.name === client.client_name);
+                        if (found) setSelectedClient(String(found.id));
+                      }}
+                    >
                       <td className="py-3 px-4 font-medium text-slate-800">{client.client_name}</td>
                       <td className="py-3 px-4 text-center text-slate-700">{client.count}</td>
                       <td className="py-3 px-4 text-center text-blue-600 font-semibold">
@@ -1282,6 +1387,40 @@ export default function RecruiterAnalytics() {
           </div>
         ) : (
           <div className="flex items-center justify-center py-12 text-slate-400">No client data available</div>
+        )}
+      </div>
+      
+      {/* Team Performance Matrix */}
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+        <h3 className="text-xl font-bold text-slate-800 mb-6">Team Performance Matrix</h3>
+        {analytics?.team_breakdown && analytics.team_breakdown.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b-2 border-slate-200">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Team</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Total Entries</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.team_breakdown.map((team, index) => (
+                  <tr
+                    key={index}
+                    className="border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer"
+                    onClick={() => {
+                      const found = teams.find((t) => t.name === team.team_name);
+                      if (found) setSelectedTeam(String(found.id));
+                    }}
+                  >
+                    <td className="py-3 px-4 font-medium text-slate-800">{team.team_name}</td>
+                    <td className="py-3 px-4 text-center text-slate-700">{team.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center py-12 text-slate-400">No team data available</div>
         )}
       </div>
     </div>

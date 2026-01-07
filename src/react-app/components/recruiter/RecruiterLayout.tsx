@@ -14,9 +14,28 @@ interface RecruiterLayoutProps {
 export default function RecruiterLayout({ children, selectedClient, onClientChange }: RecruiterLayoutProps) {
   const { user, logout } = useAuth();
   const [showCompanyPage, setShowCompanyPage] = useState(true);
+  const [showStaleModal, setShowStaleModal] = useState(false);
+  const [staleNotifications, setStaleNotifications] = useState<any[]>([]);
+  const [snoozeDays, setSnoozeDays] = useState(7);
 
   useEffect(() => {
     fetchCompanySettings();
+  }, []);
+
+  useEffect(() => {
+    fetchWithAuth('/api/recruiter/stale-notifications', { method: 'POST' })
+      .then(() => fetchWithAuth('/api/notifications?limit=10&unread_only=true'))
+      .then(async (res) => {
+        if (res && res.ok) {
+          const data = await res.json();
+          const stale = (data || []).filter((n: any) => n.type === 'system' && n.related_entity_type === 'candidate_role_association');
+          if (stale.length > 0) {
+            setStaleNotifications(stale);
+            setShowStaleModal(true);
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const fetchCompanySettings = async () => {
@@ -140,6 +159,80 @@ export default function RecruiterLayout({ children, selectedClient, onClientChan
           <NotificationBell />
         </div>
         <div className="max-w-7xl mx-auto px-8 py-6">
+          {showStaleModal && staleNotifications.length > 0 && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200">
+                <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-t-2xl">
+                  <h3 className="text-lg font-bold text-slate-800">Candidate Reminder</h3>
+                </div>
+                <div className="px-6 py-5 space-y-4">
+                  <p className="text-slate-700">
+                    Snooze this reminder or turn off reminders.
+                  </p>
+                  <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                    <p className="text-sm text-slate-800 font-semibold">
+                      {staleNotifications[0]?.title}
+                    </p>
+                    <p className="text-sm text-slate-600 mt-1">
+                      {staleNotifications[0]?.message}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={snoozeDays}
+                      onChange={(e) => setSnoozeDays(parseInt(e.target.value))}
+                      className="text-sm border border-slate-300 rounded px-3 py-2 text-slate-700"
+                      title="Remind me in"
+                    >
+                      <option value={3}>Remind in 3 days</option>
+                      <option value={7}>Remind in 7 days</option>
+                      <option value={14}>Remind in 14 days</option>
+                      <option value={30}>Remind in 30 days</option>
+                    </select>
+                    <button
+                      onClick={async () => {
+                        const assocId = staleNotifications[0]?.related_entity_id;
+                        if (!assocId) return;
+                        const res = await fetchWithAuth(`/api/recruiter/stale-notifications/${assocId}/snooze`, {
+                          method: 'POST',
+                          body: JSON.stringify({ days: snoozeDays })
+                        });
+                        if (res.ok) {
+                          setShowStaleModal(false);
+                        }
+                      }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-lg"
+                    >
+                      Snooze
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const assocId = staleNotifications[0]?.related_entity_id;
+                        if (!assocId) return;
+                        const res = await fetchWithAuth(`/api/recruiter/stale-notifications/${assocId}/disable`, {
+                          method: 'POST'
+                        });
+                        if (res.ok) {
+                          setShowStaleModal(false);
+                        }
+                      }}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-semibold px-4 py-2 rounded-lg"
+                    >
+                      Turn off
+                    </button>
+                  </div>
+                </div>
+                <div className="px-6 py-4 border-t border-slate-200 flex justify-end">
+                  <button
+                    onClick={() => setShowStaleModal(false)}
+                    className="text-slate-600 hover:text-slate-800 text-sm font-medium"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {children}
         </div>
       </main>
