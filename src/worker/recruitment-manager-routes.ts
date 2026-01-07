@@ -2418,6 +2418,79 @@ app.post("/api/rm/roles/:roleId/candidates/:candidateId/send-to-am", rmOnly, asy
   return c.json({ success: true });
 });
 
+// RM review/update submission details by role/candidate (handles missing submission_id)
+app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  const roleId = c.req.param("roleId");
+  const candidateId = c.req.param("candidateId");
+  const body = await c.req.json();
+
+  const role = await db.prepare("SELECT team_id FROM am_roles WHERE id = ?").bind(roleId).first();
+  if (!role) return c.json({ error: "Role not found" }, 404);
+
+  const access = await db
+    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
+    .bind((rmUser as any).id, (role as any).team_id)
+    .first();
+  if (!access) return c.json({ error: "Forbidden" }, 403);
+
+  const assoc = await db
+    .prepare("SELECT recruiter_user_id FROM candidate_role_associations WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0")
+    .bind(roleId, candidateId)
+    .first();
+  if (!assoc) return c.json({ error: "Association not found" }, 404);
+
+  const sub = await db.prepare(`
+    SELECT rs.id, ar.team_id
+    FROM recruiter_submissions rs
+    LEFT JOIN am_roles ar ON rs.role_id = ar.id
+    WHERE rs.role_id = ? 
+      AND rs.recruiter_user_id = ?
+      AND rs.entry_type = 'submission'
+    ORDER BY rs.submission_date DESC, rs.created_at DESC
+    LIMIT 1
+  `).bind(roleId, (assoc as any).recruiter_user_id).first();
+
+  if (!sub) return c.json({ error: "Submission not found" }, 404);
+
+  let workType = body.rm_work_type || null;
+  if (workType) {
+    const wt = String(workType).toLowerCase();
+    if (wt === 'sow' || wt === 'payroll') {
+      workType = wt === 'sow' ? 'SOW' : 'Payroll';
+    } else {
+      return c.json({ error: "Invalid contract type: must be SOW or Payroll" }, 400);
+    }
+  }
+
+  await db.prepare(`
+    UPDATE recruiter_submissions SET
+      rm_validation_status = COALESCE(?, rm_validation_status),
+      rm_rate_bill = COALESCE(?, rm_rate_bill),
+      rm_rate_pay = COALESCE(?, rm_rate_pay),
+      rm_location = COALESCE(?, rm_location),
+      rm_work_type = COALESCE(?, rm_work_type),
+      cv_match_percent = COALESCE(?, cv_match_percent),
+      rm_notes = COALESCE(?, rm_notes),
+      rm_reviewed_at = COALESCE(?, CURRENT_TIMESTAMP),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(
+    body.rm_validation_status || null,
+    (body.rm_payment != null ? body.rm_payment : body.rm_rate_bill) || null,
+    body.rm_rate_pay || null,
+    body.rm_location || null,
+    workType,
+    body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+    body.rm_notes || null,
+    body.rm_review_date || null,
+    (sub as any).id
+  ).run();
+
+  return c.json({ success: true });
+});
+
 // RM submit candidate to client
 app.post("/api/rm/roles/:roleId/candidates/:candidateId/submit-to-client", rmOnly, async (c) => {
   const db = c.env.DB;
