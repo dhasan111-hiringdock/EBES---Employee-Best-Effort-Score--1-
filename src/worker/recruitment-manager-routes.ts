@@ -2215,7 +2215,7 @@ app.put("/api/rm/submissions/:id/review", rmOnly, async (c) => {
     WHERE id = ?
   `).bind(
     body.rm_validation_status || null,
-    body.rm_rate_bill || null,
+    (body.rm_payment != null ? body.rm_payment : body.rm_rate_bill) || null,
     body.rm_rate_pay || null,
     body.rm_location || null,
     workType,
@@ -2262,8 +2262,7 @@ app.post("/api/rm/roles/:roleId/candidates/:candidateId/send-to-am", rmOnly, asy
 
   const s = submission as any;
   const missing: string[] = [];
-  if (!s || s.rm_rate_bill == null) missing.push("rate bill");
-  if (!s || s.rm_rate_pay == null) missing.push("rate pay");
+  if (!s || s.rm_rate_bill == null) missing.push("payment");
   if (!s || !s.rm_work_type) missing.push("contract type");
   if (!s || s.cv_match_percent == null) missing.push("validation score");
   if (!s || !s.rm_validation_status) missing.push("validation status");

@@ -109,7 +109,7 @@ export default function RMRoles() {
     under_consideration: [],
     rejected: [],
   });
-  const [reviewEdits, setReviewEdits] = useState<Record<number, { rm_validation_status?: string; rm_rate_bill?: string; rm_rate_pay?: string; rm_location?: string; rm_work_type?: string; rm_notes?: string }>>({});
+  const [reviewEdits, setReviewEdits] = useState<Record<number, { rm_validation_status?: string; rm_payment?: string; rm_location?: string; rm_work_type?: string; rm_notes?: string; rm_score_0_5?: string }>>({});
   const submissionsRef = useRef<HTMLDivElement | null>(null);
   const underCons = submissions.under_consideration || [];
   const submittedToAM = underCons.filter((i: any) => (i as any).association_status === 'submitted');
@@ -300,7 +300,10 @@ export default function RMRoles() {
     }
   };
  
-  const sendToAM = async (roleId: number, candidateId: number) => {
+  const sendToAM = async (roleId: number, candidateId: number, submissionId?: number) => {
+    if (submissionId) {
+      await saveReview(submissionId);
+    }
     const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/send-to-am`, {
       method: 'POST',
       body: JSON.stringify({}),
@@ -947,22 +950,22 @@ export default function RMRoles() {
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
                                         disabled={!item.submission_id}
                                       />
-                                      <input
-                                        type="number"
-                                        placeholder="Rate bill"
-                                        defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_rate_bill', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
-                                      <input
-                                        type="number"
-                                        placeholder="Rate pay"
-                                        defaultValue={item.rm_rate_pay !== undefined ? String(item.rm_rate_pay) : ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_rate_pay', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
+                                      <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                        <input
+                                          type="number"
+                                          placeholder="Payment"
+                                          defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_payment', e.target.value)}
+                                          className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                          disabled={!item.submission_id}
+                                        />
+                                        {(() => {
+                                          const wt = (reviewEdits[item.submission_id || 0]?.rm_work_type || item.rm_work_type || '').toLowerCase();
+                                          const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
+                                          return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
+                                        })()}
+                                      </div>
                                       <input
                                         type="text"
                                         placeholder="Location"
@@ -1016,7 +1019,7 @@ export default function RMRoles() {
                                       Save Review
                                     </button>
                                     <button
-                                      onClick={() => sendToAM(selectedRole!.id, item.candidate_id)}
+                                      onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id)}
                                       disabled={!item.submission_id}
                                       className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50"
                                     >
@@ -1084,22 +1087,22 @@ export default function RMRoles() {
                                         className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
                                         disabled={!item.submission_id}
                                       />
-                                      <input
-                                        type="text"
-                                        placeholder="Rate bill"
-                                        defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_rate_bill', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
-                                      <input
-                                        type="text"
-                                        placeholder="Rate pay"
-                                        defaultValue={item.rm_rate_pay !== undefined ? String(item.rm_rate_pay) : ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_rate_pay', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
+                                      <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                        <input
+                                          type="number"
+                                          placeholder="Payment"
+                                          defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_payment', e.target.value)}
+                                          className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                          disabled={!item.submission_id}
+                                        />
+                                        {(() => {
+                                          const wt = (reviewEdits[item.submission_id || 0]?.rm_work_type || item.rm_work_type || '').toLowerCase();
+                                          const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
+                                          return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
+                                        })()}
+                                      </div>
                                       <input
                                         type="text"
                                         placeholder="Location"

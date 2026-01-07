@@ -122,7 +122,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
             <div className="flex items-center gap-2">
               <select defaultValue="" onChange={(e) => { const v = e.target.value; if (!v || !submissionsRole) return; const roleId = submissionsRole.id; if (item.association_status === 'client_submitted') { if (v === 'client_reject') clientReject(roleId, item.candidate_id); else if (v === 'pull_out') pullOut(roleId, item.candidate_id); else if (v === 'deal') markDeal(roleId, item.candidate_id); } else { if (v === 'submit_to_client') submitToClient(roleId, item.candidate_id); else if (v === 'reject') discardCandidate(roleId, item.candidate_id); } e.currentTarget.value = ''; }} className="px-3 py-2 text-sm border border-gray-300 rounded-lg">
                 <option value="" disabled>Choose Action</option>
-                {item.association_status === 'client_submitted' ? (<><option value="client_reject">Discarded by Client</option><option value="pull_out">Pull Out</option><option value="deal">Deal</option></>) : (<><option value="submit_to_client">Submit to Client</option><option value="reject">Reject</option></>)}
+                {item.association_status === 'client_submitted' ? (<><option value="client_reject">Discard By Client</option><option value="pull_out">Pull Out</option><option value="deal">Deal</option></>) : (<><option value="submit_to_client">Submit to Client</option><option value="reject">Discard</option></>)}
               </select>
             </div>
           )}
