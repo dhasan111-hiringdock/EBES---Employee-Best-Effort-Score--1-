@@ -9,10 +9,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const [accountChoices, setAccountChoices] = useState<any[]>([]);
-  const DEFAULT_API_BASE =
-    typeof window !== 'undefined' && window.location.hostname.endsWith('.vercel.app')
-      ? 'https://ebes-app.dhasan111.workers.dev'
-      : '';
+  const DEFAULT_API_BASE = 'https://ebes-app.dhasan111.workers.dev';
   const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? DEFAULT_API_BASE;
 
   const getFinancialYearLabel = (dateStr: string) => {

@@ -136,6 +136,7 @@ export default function AccountManagerDashboard() {
         ) : (
           <Routes>
             <Route path="/" element={<AMDashboard />} />
+            <Route path="/daily-report" element={<AMDashboard />} />
             <Route
               path="/roles"
               element={

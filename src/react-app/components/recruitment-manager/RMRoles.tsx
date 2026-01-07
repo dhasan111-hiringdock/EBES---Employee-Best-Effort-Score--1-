@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router';
 import { 
   Search, 
   Filter, 
@@ -40,8 +41,8 @@ interface Role {
   account_manager_code: string;
   created_at: string;
   total_submissions?: number;
-  under_evaluation?: number;
-  submitted_to_client?: number;
+  under_client_evaluation?: number;
+  client_rejected?: number;
   total_interviews?: number;
 }
 
@@ -89,7 +90,18 @@ interface RoleSubmission {
   rm_reviewed_at?: string;
 }
 
+interface DailyStats {
+  roles_created: number;
+  submissions: number;
+  forwarded_to_client: number;
+  client_rejected: number;
+  interviews: number;
+  deals: number;
+  discarded: number;
+}
+
 export default function RMRoles() {
+  const location = useLocation();
   const [roles, setRoles] = useState<Role[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -111,15 +123,48 @@ export default function RMRoles() {
   });
   const [reviewEdits, setReviewEdits] = useState<Record<number, { rm_validation_status?: string; rm_payment?: string; rm_location?: string; rm_work_type?: string; rm_notes?: string; rm_score_0_5?: string }>>({});
   const submissionsRef = useRef<HTMLDivElement | null>(null);
+  const [detailsTab, setDetailsTab] = useState<'role' | 'submissions'>('submissions');
   const underCons = submissions.under_consideration || [];
   const submittedToAM = underCons.filter((i: any) => (i as any).association_status === 'submitted');
   const submittedToClient = underCons.filter((i: any) => (i as any).association_status === 'client_submitted');
   const clientRejected = underCons.filter((i: any) => (i as any).association_status === 'client_rejected');
   const inPlay = underCons.filter((i: any) => !['submitted','client_submitted','client_rejected','deal'].includes((i as any).association_status));
+  const totalAllSubmissions = (submissions.pending_evaluation?.length || 0) + (submissions.under_consideration?.length || 0) + (submissions.rejected?.length || 0);
+
+  const [dailyReport, setDailyReport] = useState<{ day_before_yesterday: DailyStats; yesterday: DailyStats } | null>(null);
 
   useEffect(() => {
+    const loadDaily = async () => {
+      try {
+        const res = await fetchWithAuth('/api/rm/reports/daily');
+        if (res.ok) setDailyReport(await res.json());
+      } catch {}
+    };
     fetchInitialData();
+    loadDaily();
   }, []);
+
+  const triedTabsRef = useRef<{ activeTried?: boolean; nonActiveTried?: boolean }>({});
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const roleIdParam = params.get('roleId');
+    if (!roleIdParam) return;
+    const targetId = Number(roleIdParam);
+    if (!Number.isFinite(targetId)) return;
+    const match = roles.find(r => r.id === targetId);
+    if (match) {
+      setSelectedRole(match);
+      setDetailsTab('submissions');
+      return;
+    }
+    if (activeTab === 'active' && !triedTabsRef.current.nonActiveTried) {
+      triedTabsRef.current.nonActiveTried = true;
+      setActiveTab('non-active');
+    } else if (activeTab === 'non-active' && !triedTabsRef.current.activeTried) {
+      triedTabsRef.current.activeTried = true;
+      setActiveTab('active');
+    }
+  }, [location.search, roles, activeTab]);
 
   useEffect(() => {
     fetchRoles();
@@ -128,6 +173,7 @@ export default function RMRoles() {
   useEffect(() => {
     if (selectedRole) {
       loadRoleSubmissions(selectedRole.id);
+      setDetailsTab('submissions');
     } else {
       setSubmissions({ pending_evaluation: [], under_consideration: [], rejected: [] });
       setReviewEdits({});
@@ -201,7 +247,7 @@ export default function RMRoles() {
         color: 'text-blue-700', 
         bg: 'bg-blue-50 border-blue-200', 
         icon: TrendingUp, 
-        label: 'Deal Closed' 
+        label: 'Deal' 
       },
       lost: { 
         color: 'text-red-700', 
@@ -437,6 +483,43 @@ export default function RMRoles() {
         </div>
       </div>
 
+      {/* Custom Reports */}
+      {dailyReport && (
+        <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <TrendingUp className="w-5 h-5 text-indigo-600" />
+            <h3 className="font-semibold text-slate-800">Custom Reports</h3>
+            <span className="text-xs text-slate-500">Daily changes</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border rounded-xl p-4">
+              <p className="text-sm font-semibold text-slate-700 mb-2">Day Before Yesterday</p>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div><p className="text-slate-500">Roles Created</p><p className="font-semibold">{dailyReport.day_before_yesterday.roles_created}</p></div>
+                <div><p className="text-slate-500">Submissions</p><p className="font-semibold">{dailyReport.day_before_yesterday.submissions}</p></div>
+                <div><p className="text-slate-500">Submitted to Client</p><p className="font-semibold">{dailyReport.day_before_yesterday.forwarded_to_client}</p></div>
+                <div><p className="text-slate-500">Client Rejected</p><p className="font-semibold">{dailyReport.day_before_yesterday.client_rejected}</p></div>
+                <div><p className="text-slate-500">Interviews</p><p className="font-semibold">{dailyReport.day_before_yesterday.interviews}</p></div>
+                <div><p className="text-slate-500">Deals</p><p className="font-semibold">{dailyReport.day_before_yesterday.deals}</p></div>
+                <div><p className="text-slate-500">Discarded</p><p className="font-semibold">{dailyReport.day_before_yesterday.discarded}</p></div>
+              </div>
+            </div>
+            <div className="border rounded-xl p-4">
+              <p className="text-sm font-semibold text-slate-700 mb-2">Yesterday</p>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div><p className="text-slate-500">Roles Created</p><p className="font-semibold">{dailyReport.yesterday.roles_created}</p></div>
+                <div><p className="text-slate-500">Submissions</p><p className="font-semibold">{dailyReport.yesterday.submissions}</p></div>
+                <div><p className="text-slate-500">Submitted to Client</p><p className="font-semibold">{dailyReport.yesterday.forwarded_to_client}</p></div>
+                <div><p className="text-slate-500">Client Rejected</p><p className="font-semibold">{dailyReport.yesterday.client_rejected}</p></div>
+                <div><p className="text-slate-500">Interviews</p><p className="font-semibold">{dailyReport.yesterday.interviews}</p></div>
+                <div><p className="text-slate-500">Deals</p><p className="font-semibold">{dailyReport.yesterday.deals}</p></div>
+                <div><p className="text-slate-500">Discarded</p><p className="font-semibold">{dailyReport.yesterday.discarded}</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -536,7 +619,7 @@ export default function RMRoles() {
           {filteredRoles.map((role) => {
             const statusConfig = getStatusConfig(role.status);
             return (
-              <div key={role.id} className={`rounded-xl p-4 hover:shadow-md transition-shadow border ${((role.under_evaluation ?? 0) > 0) ? 'border-yellow-300 bg-yellow-50' : 'border-slate-200'}`}>
+              <div key={role.id} className={`rounded-xl p-4 hover:shadow-md transition-shadow border ${((role.under_client_evaluation ?? 0) > 0) ? 'border-yellow-300 bg-yellow-50' : 'border-slate-200'}`}>
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -548,7 +631,7 @@ export default function RMRoles() {
                     {statusConfig.label}
                   </div>
                 </div>
-                {(role.under_evaluation ?? 0) > 0 && (
+                {(role.under_client_evaluation ?? 0) > 0 && (
                   <div className="mb-2">
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
                       <Clock className="w-3 h-3" />
@@ -567,12 +650,12 @@ export default function RMRoles() {
                     <p className="text-2xl font-bold text-indigo-600">{role.total_submissions ?? 0}</p>
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-                    <p className="text-xs text-blue-700 mb-1 font-semibold">Under Evaluation</p>
-                    <p className="text-2xl font-bold text-blue-600">{role.under_evaluation ?? 0}</p>
+                    <p className="text-xs text-blue-700 mb-1 font-semibold">Submitted to Client</p>
+                    <p className="text-2xl font-bold text-blue-600">{role.under_client_evaluation ?? 0}</p>
                   </div>
                   <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                    <p className="text-xs text-slate-700 mb-1 font-semibold">Submitted to Client</p>
-                    <p className="text-2xl font-bold text-slate-900">{role.submitted_to_client ?? 0}</p>
+                    <p className="text-xs text-slate-700 mb-1 font-semibold">Client Rejected</p>
+                    <p className="text-2xl font-bold text-slate-900">{role.client_rejected ?? 0}</p>
                   </div>
                 </div>
 
@@ -630,10 +713,10 @@ export default function RMRoles() {
                     Submissions
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    Under Evaluation
+                    Submitted to Client
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    Submitted to Client
+                    Client Rejected
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                     Client
@@ -690,10 +773,10 @@ export default function RMRoles() {
                         <p className="text-sm font-semibold text-slate-800">{role.total_submissions ?? 0}</p>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <p className="text-sm font-semibold text-blue-700">{role.under_evaluation ?? 0}</p>
+                        <p className="text-sm font-semibold text-blue-700">{role.under_client_evaluation ?? 0}</p>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <p className="text-sm font-semibold text-slate-800">{role.submitted_to_client ?? 0}</p>
+                        <p className="text-sm font-semibold text-slate-800">{role.client_rejected ?? 0}</p>
                       </td>
                       <td className="px-6 py-4">
                         <div>
@@ -779,6 +862,21 @@ export default function RMRoles() {
             
             {/* Modal Body */}
             <div className="p-8 overflow-y-auto max-h-[calc(90vh-120px)]">
+              <div className="mb-4 flex items-center gap-2">
+                <button
+                  onClick={() => setDetailsTab('submissions')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${detailsTab === 'submissions' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  Submission Details
+                </button>
+                <button
+                  onClick={() => setDetailsTab('role')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border ${detailsTab === 'role' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  Role Details
+                </button>
+              </div>
+              {detailsTab === 'role' && (
               <div className="space-y-6">
                 {/* Status Badge */}
                 <div>
@@ -863,6 +961,7 @@ export default function RMRoles() {
                   </div>
                 </div>
               </div>
+              )}
             </div>
 
             {/* Modal Footer */}
@@ -887,6 +986,7 @@ export default function RMRoles() {
                 Edit Role
               </button>
             </div>
+            {detailsTab === 'submissions' && (
             <div className="px-8 pb-8" ref={submissionsRef}>
               <div className="mt-6 bg-white border border-slate-200 rounded-2xl">
                 <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
@@ -899,6 +999,40 @@ export default function RMRoles() {
                   )}
                 </div>
                 <div className="p-6">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
+                    <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100">
+                      <p className="text-xs text-indigo-700 mb-1 font-semibold">Total Submissions</p>
+                      <p className="text-2xl font-bold text-indigo-600">{totalAllSubmissions}</p>
+                    </div>
+                    <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-100">
+                      <p className="text-xs text-yellow-700 mb-1 font-semibold">Pending Evaluation</p>
+                      <p className="text-2xl font-bold text-yellow-700">{submissions.pending_evaluation.length}</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+                      <p className="text-xs text-emerald-700 mb-1 font-semibold">Submitted to AM</p>
+                      <p className="text-2xl font-bold text-emerald-700">{submittedToAM.length}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                      <p className="text-xs text-slate-700 mb-1 font-semibold">In Play</p>
+                      <p className="text-2xl font-bold text-slate-900">{inPlay.length}</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                      <p className="text-xs text-blue-700 mb-1 font-semibold">Submitted to Client</p>
+                      <p className="text-2xl font-bold text-blue-600">{submittedToClient.length}</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                      <p className="text-xs text-red-700 mb-1 font-semibold">Client Rejected</p>
+                      <p className="text-2xl font-bold text-red-700">{clientRejected.length}</p>
+                    </div>
+                    <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                      <p className="text-xs text-red-700 mb-1 font-semibold">Rejected</p>
+                      <p className="text-2xl font-bold text-red-700">{submissions.rejected.length}</p>
+                    </div>
+                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-100">
+                      <p className="text-xs text-purple-700 mb-1 font-semibold">Total Interviews</p>
+                      <p className="text-2xl font-bold text-purple-700">{selectedRole.total_interviews ?? 0}</p>
+                    </div>
+                  </div>
                   {submissions.pending_evaluation.length === 0 && submissions.under_consideration.length === 0 && submissions.rejected.length === 0 ? (
                     <div className="text-center py-8 bg-slate-50 rounded-xl">
                       <Briefcase className="w-10 h-10 text-slate-400 mx-auto mb-2" />
@@ -921,7 +1055,7 @@ export default function RMRoles() {
                                       <span className="font-semibold text-slate-800">{item.candidate_name}</span>
                                       <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
-                                        Pending evaluation
+                                        Pending Evaluation
                                       </span>
                                     </div>
                                     <div className="text-xs text-slate-600 mt-1">
@@ -1273,6 +1407,7 @@ export default function RMRoles() {
                 </div>
               </div>
             </div>
+            )}
           </div>
         </div>
       )}

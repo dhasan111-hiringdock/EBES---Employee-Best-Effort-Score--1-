@@ -14,7 +14,7 @@ interface Role {
   total_interviews: number;
   total_submissions: number;
   under_client_evaluation?: number;
-  submitted_to_client?: number;
+  client_rejected?: number;
   has_pending_dropout?: boolean;
   pending_dropout_reason?: string;
   has_dropout?: boolean;
@@ -94,12 +94,12 @@ export default function RoleCard({
           <p className="text-2xl font-bold text-indigo-600">{role.total_submissions}</p>
         </div>
         <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-          <p className="text-xs text-blue-700 mb-1 font-semibold">Under Evaluation</p>
+          <p className="text-xs text-blue-700 mb-1 font-semibold">Submitted to Client</p>
           <p className="text-2xl font-bold text-blue-600">{role.under_client_evaluation ?? 0}</p>
         </div>
         <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-          <p className="text-xs text-gray-700 mb-1 font-semibold">Submitted to Client</p>
-          <p className="text-2xl font-bold text-gray-900">{role.submitted_to_client ?? 0}</p>
+          <p className="text-xs text-gray-700 mb-1 font-semibold">Client Rejected</p>
+          <p className="text-2xl font-bold text-gray-900">{role.client_rejected ?? 0}</p>
         </div>
       </div>
 

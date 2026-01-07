@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, Search, UserCheck, UserX, Eye, Trash2, RotateCcw, Briefcase, Edit } from "lucide-react";
+import { Users, Search, UserCheck, UserX, Eye, Trash2, RotateCcw, Briefcase, Edit, Download, Copy, ExternalLink, XCircle } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 import EditCandidateModal from "@/react-app/components/recruiter/EditCandidateModal";
 
@@ -20,6 +20,7 @@ interface Candidate {
 
 interface Association {
   id: number;
+  role_id: number;
   role_code: string;
   role_title: string;
   role_status: string;
@@ -43,11 +44,143 @@ export default function RecruiterCandidates() {
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [candidateDetails, setCandidateDetails] = useState<{ candidate: Candidate; associations: Association[] } | null>(null);
   const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
+  const [assocSearch, setAssocSearch] = useState<string>('');
+  const [assocSortKey, setAssocSortKey] = useState<'recent' | 'status' | 'client' | 'team' | 'role'>('recent');
+  const [assocSortOrder, setAssocSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [assocStatusFilter, setAssocStatusFilter] = useState<'all' | 'rm_evaluation' | 'submitted' | 'client_submitted' | 'client_rejected' | 'deal' | 'discarded'>('all');
+  const [assocHideDiscarded, setAssocHideDiscarded] = useState<boolean>(false);
+  const assocAllExportFields = [
+    'role_code',
+    'role_title',
+    'client_name',
+    'team_name',
+    'status',
+    'is_discarded',
+    'discarded_reason',
+    'submission_date',
+    'recruiter_name',
+    'recruiter_code'
+  ];
+  const assocFieldLabels: Record<string, string> = {
+    role_code: 'Role Code',
+    role_title: 'Role Title',
+    client_name: 'Client',
+    team_name: 'Team',
+    status: 'Status',
+    is_discarded: 'Discarded',
+    discarded_reason: 'Discard Reason',
+    submission_date: 'Submission Date',
+    recruiter_name: 'Recruiter Name',
+    recruiter_code: 'Recruiter Code'
+  };
+  const [isAssocExportOpen, setIsAssocExportOpen] = useState(false);
+  const [assocExportFields, setAssocExportFields] = useState<string[]>(assocAllExportFields);
+  const [assocExportPresets, setAssocExportPresets] = useState<Array<{ name: string; fields: string[] }>>([]);
+  const [assocPresetName, setAssocPresetName] = useState('');
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
+  const [discardReason, setDiscardReason] = useState('');
+  const [discardTarget, setDiscardTarget] = useState<{ type: 'candidate' | 'association'; candidateId: number; roleId?: number } | null>(null);
 
   useEffect(() => {
     fetchCandidates();
   }, [activeTab, searchQuery]);
 
+  useEffect(() => {
+    try {
+      const p = localStorage.getItem('candidateAssocExportPresets');
+      if (p) {
+        const parsed = JSON.parse(p);
+        if (Array.isArray(parsed)) setAssocExportPresets(parsed);
+      }
+      const last = localStorage.getItem('candidateAssocExportLastFields');
+      if (last) {
+        const f = JSON.parse(last);
+        if (Array.isArray(f) && f.length > 0) setAssocExportFields(f.filter((x: string) => assocAllExportFields.includes(x)));
+      }
+    } catch {}
+  }, []);
+
+  const openAssocExport = () => {
+    setIsAssocExportOpen(true);
+  };
+  const toggleAssocField = (f: string) => {
+    setAssocExportFields((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
+  };
+  const selectAllAssocFields = () => setAssocExportFields(assocAllExportFields);
+  const clearAllAssocFields = () => setAssocExportFields([]);
+  const saveAssocPreset = () => {
+    const name = assocPresetName.trim();
+    if (!name) return;
+    setAssocExportPresets((prev) => {
+      const filtered = prev.filter((p) => p.name !== name);
+      const next = [...filtered, { name, fields: assocExportFields }];
+      try { localStorage.setItem('candidateAssocExportPresets', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const applyAssocPresetByName = (name: string) => {
+    const p = assocExportPresets.find((x) => x.name === name);
+    if (!p) return;
+    setAssocExportFields(p.fields.filter((f) => assocAllExportFields.includes(f)));
+  };
+  const deleteAssocPresetByName = (name: string) => {
+    setAssocExportPresets((prev) => {
+      const next = prev.filter((p) => p.name !== name);
+      try { localStorage.setItem('candidateAssocExportPresets', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const exportAssocSelectedCsv = () => {
+    if (!candidateDetails) return;
+    const fields = assocExportFields.length > 0 ? assocExportFields : assocAllExportFields;
+    const headers = fields;
+    const term = assocSearch.trim().toLowerCase();
+    const filteredByTerm = term
+      ? candidateDetails.associations.filter((a) => {
+          const role = (a.role_title || '').toLowerCase();
+          const code = (a.role_code || '').toLowerCase();
+          const client = (a.client_name || '').toLowerCase();
+          const team = (a.team_name || '').toLowerCase();
+          return role.includes(term) || code.includes(term) || client.includes(term) || team.includes(term);
+        })
+      : candidateDetails.associations;
+    const filteredByStatus = assocStatusFilter === 'all'
+      ? filteredByTerm
+      : filteredByTerm.filter((a) => {
+          if (assocStatusFilter === 'discarded') return a.is_discarded === 1;
+          return (a.status || '') === assocStatusFilter && a.is_discarded !== 1;
+        });
+    const filteredFinal = assocHideDiscarded
+      ? filteredByStatus.filter((a) => a.is_discarded !== 1)
+      : filteredByStatus;
+    const rows = filteredFinal.map((a) =>
+      fields.map((f) => {
+        switch (f) {
+          case 'role_code': return (a.role_code || '').replace(/,/g, ' ');
+          case 'role_title': return (a.role_title || '').replace(/,/g, ' ');
+          case 'client_name': return (a.client_name || '').replace(/,/g, ' ');
+          case 'team_name': return (a.team_name || '').replace(/,/g, ' ');
+          case 'status': return a.status || '';
+          case 'is_discarded': return String(a.is_discarded || 0);
+          case 'discarded_reason': return (a.discarded_reason || '').replace(/,/g, ' ');
+          case 'submission_date': return a.submission_date || '';
+          case 'recruiter_name': return (a.recruiter_name || '').replace(/,/g, ' ');
+          case 'recruiter_code': return (a.recruiter_code || '').replace(/,/g, ' ');
+          default: return '';
+        }
+      }).join(',')
+    );
+    const csv = [headers.join(',')].concat(rows).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${candidateDetails.candidate.candidate_code}-associations.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    try { localStorage.setItem('candidateAssocExportLastFields', JSON.stringify(fields)); } catch {}
+    setIsAssocExportOpen(false);
+  };
   const fetchCandidates = async () => {
     try {
       setLoading(true);
@@ -84,23 +217,56 @@ export default function RecruiterCandidates() {
   };
 
   const handleDiscardCandidate = async (candidateId: number) => {
-    if (!confirm('Are you sure you want to discard this candidate? They will be moved to the inactive list.')) {
-      return;
-    }
+    setDiscardTarget({ type: 'candidate', candidateId });
+    setDiscardReason('');
+    setShowDiscardModal(true);
+  };
+
+  const handleDiscardAssociation = async (candidateId: number, roleId: number) => {
+    setDiscardTarget({ type: 'association', candidateId, roleId });
+    setDiscardReason('');
+    setShowDiscardModal(true);
+  };
+
+  const confirmDiscard = async () => {
+    if (!discardTarget) return;
 
     try {
-      const response = await fetchWithAuth(`/api/recruiter/candidates/${candidateId}/discard`, {
-        method: 'POST'
-      });
+      if (discardTarget.type === 'candidate') {
+        const response = await fetchWithAuth(`/api/recruiter/candidates/${discardTarget.candidateId}/discard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: discardReason.trim() || null })
+        });
 
-      if (response.ok) {
-        setSelectedCandidate(null);
-        setCandidateDetails(null);
-        fetchCandidates();
+        if (response.ok) {
+          setShowDiscardModal(false);
+          setSelectedCandidate(null);
+          setCandidateDetails(null);
+          fetchCandidates();
+        }
+      } else {
+        const response = await fetchWithAuth(`/api/recruiter/candidates/${discardTarget.candidateId}/roles/${discardTarget.roleId}/discard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: discardReason.trim() || null })
+        });
+
+        if (response.ok) {
+          setShowDiscardModal(false);
+          if (selectedCandidate) {
+            await fetchCandidateDetails(selectedCandidate.id);
+          }
+        }
       }
     } catch (error) {
-      console.error('Failed to discard candidate:', error);
     }
+  };
+
+  const cancelDiscard = () => {
+    setShowDiscardModal(false);
+    setDiscardReason('');
+    setDiscardTarget(null);
   };
 
   const handleRestoreCandidate = async (candidateId: number) => {
@@ -242,6 +408,35 @@ export default function RecruiterCandidates() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    {candidate.email && (
+                      <button
+                        onClick={() => navigator.clipboard.writeText(candidate.email)}
+                        className="px-2 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Copy email"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    )}
+                    {candidate.phone && (
+                      <button
+                        onClick={() => navigator.clipboard.writeText(candidate.phone)}
+                        className="px-2 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Copy phone"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    )}
+                    {candidate.resume_url && (
+                      <a
+                        href={candidate.resume_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2 py-2 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2 font-medium"
+                        title="Open resume"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
                     <button
                       onClick={() => handleViewDetails(candidate)}
                       className="px-4 py-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-2 font-medium"
@@ -326,16 +521,147 @@ export default function RecruiterCandidates() {
               </div>
 
               {/* Role Associations */}
-              <div>
-                <h4 className="font-semibold text-slate-800 mb-3">Role Submissions History</h4>
-                {candidateDetails.associations.length === 0 ? (
-                  <div className="text-center py-8 bg-slate-50 rounded-lg">
-                    <Briefcase className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-                    <p className="text-slate-600">No role submissions yet</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {candidateDetails.associations.map((assoc) => (
+            <div>
+              <h4 className="font-semibold text-slate-800 mb-3">Role Submissions History</h4>
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3 sticky top-0 z-10 bg-white">
+              <div className="relative w-full md:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={assocSearch}
+                  onChange={(e) => setAssocSearch(e.target.value)}
+                  placeholder="Search submissions"
+                  className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm"
+                />
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={assocHideDiscarded}
+                  onChange={(e) => setAssocHideDiscarded(e.target.checked)}
+                />
+                Hide discarded
+              </label>
+              <select
+                value={assocSortKey}
+                onChange={(e) => setAssocSortKey(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full md:w-auto"
+              >
+                <option value="recent">Sort: Recent</option>
+                <option value="status">Sort: Status</option>
+                <option value="client">Sort: Client</option>
+                <option value="team">Sort: Team</option>
+                <option value="role">Sort: Role Title</option>
+              </select>
+              <select
+                value={assocSortOrder}
+                onChange={(e) => setAssocSortOrder(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full md:w-auto"
+              >
+                <option value="desc">Order: Desc</option>
+                <option value="asc">Order: Asc</option>
+              </select>
+              <select
+                value={assocStatusFilter}
+                onChange={(e) => setAssocStatusFilter(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full md:w-auto"
+                title="Filter by Status"
+              >
+                <option value="all">Filter: All</option>
+                <option value="rm_evaluation">Pending Evaluation</option>
+                <option value="submitted">Submitted to AM</option>
+                <option value="client_submitted">Submitted to Client</option>
+                <option value="client_rejected">Client Rejected</option>
+                <option value="deal">Deal</option>
+                <option value="discarded">Discarded</option>
+              </select>
+              <button
+                onClick={openAssocExport}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                title="Export CSV"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+              </div>
+              {candidateDetails.associations.length === 0 ? (
+                <div className="text-center py-8 bg-slate-50 rounded-lg">
+                  <Briefcase className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+                  <p className="text-slate-600">No role submissions yet</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(() => {
+                    const term = assocSearch.trim().toLowerCase();
+                    const filteredByTerm = term
+                      ? candidateDetails.associations.filter((a) => {
+                          const role = (a.role_title || '').toLowerCase();
+                          const code = (a.role_code || '').toLowerCase();
+                          const client = (a.client_name || '').toLowerCase();
+                          const team = (a.team_name || '').toLowerCase();
+                          return role.includes(term) || code.includes(term) || client.includes(term) || team.includes(term);
+                        })
+                      : candidateDetails.associations;
+                    const filtered = assocStatusFilter === 'all'
+                      ? filteredByTerm
+                      : filteredByTerm.filter((a) => {
+                          if (assocStatusFilter === 'discarded') return a.is_discarded === 1;
+                          return (a.status || '') === assocStatusFilter && a.is_discarded !== 1;
+                        });
+                    const filteredFinal = assocHideDiscarded
+                      ? filtered.filter((a) => a.is_discarded !== 1)
+                      : filtered;
+                    const statusWeight = (a: Association) => {
+                      if (a.is_discarded) return -1;
+                      const s = a.status || '';
+                      if (s === 'deal') return 5;
+                      if (s === 'client_submitted') return 4;
+                      if (s === 'submitted') return 3;
+                      if (s === 'rm_evaluation') return 2;
+                      if (s === 'client_rejected') return 1;
+                      return 0;
+                    };
+                    const sorted = [...filteredFinal].sort((a, b) => {
+                      if (assocSortKey === 'status') {
+                        const wa = statusWeight(a);
+                        const wb = statusWeight(b);
+                        return assocSortOrder === 'desc' ? wb - wa : wa - wb;
+                      }
+                      if (assocSortKey === 'client') {
+                        const cmp = (a.client_name || '').localeCompare(b.client_name || '');
+                        return assocSortOrder === 'desc' ? cmp : -cmp;
+                      }
+                      if (assocSortKey === 'team') {
+                        const cmp = (a.team_name || '').localeCompare(b.team_name || '');
+                        return assocSortOrder === 'desc' ? cmp : -cmp;
+                      }
+                      if (assocSortKey === 'role') {
+                        const cmp = (a.role_title || '').localeCompare(b.role_title || '');
+                        return assocSortOrder === 'desc' ? cmp : -cmp;
+                      }
+                      const da = a.submission_date ? new Date(a.submission_date).getTime() : 0;
+                      const db = b.submission_date ? new Date(b.submission_date).getTime() : 0;
+                      return assocSortOrder === 'desc' ? db - da : da - db;
+                    });
+                    const chipClass = (a: Association) => {
+                      if (a.is_discarded) return 'bg-red-50 text-red-700 border-red-200';
+                      const s = a.status || '';
+                      if (s === 'client_submitted') return 'bg-blue-50 text-blue-700 border-blue-200';
+                      if (s === 'client_rejected') return 'bg-gray-50 text-gray-700 border-gray-200';
+                      if (s === 'deal') return 'bg-green-50 text-green-700 border-green-200';
+                      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                    };
+                    const chipLabel = (a: Association) => {
+                      if (a.is_discarded) return 'Discarded';
+                      const s = a.status || 'submitted';
+                      if (s === 'rm_evaluation') return 'Pending Evaluation';
+                      if (s === 'submitted') return 'Submitted to AM';
+                      if (s === 'client_submitted') return 'Submitted to Client';
+                      if (s === 'client_rejected') return 'Client Rejected';
+                      if (s === 'deal') return 'Deal';
+                      return 'In Play';
+                    };
+                    return sorted.map((assoc) => (
                       <div
                         key={assoc.id}
                         className={`border-2 rounded-lg p-4 ${
@@ -362,7 +688,18 @@ export default function RecruiterCandidates() {
                               </div>
                               <div>
                                 <span className="text-slate-500">Role Status:</span>
-                                <p className="font-medium text-slate-800 capitalize">{assoc.role_status}</p>
+                                <p className="font-medium text-slate-800">
+                                  {(() => {
+                                    const rs = assoc.role_status || '';
+                                    if (rs === 'active') return 'Active';
+                                    if (rs === 'lost') return 'Lost';
+                                    if (rs === 'deal') return 'Deal';
+                                    if (rs === 'on_hold') return 'On Hold';
+                                    if (rs === 'cancelled') return 'Cancelled';
+                                    if (rs === 'no_answer') return 'No Answer';
+                                    return rs || '-';
+                                  })()}
+                                </p>
                               </div>
                               <div>
                                 <span className="text-slate-500">Submitted:</span>
@@ -378,7 +715,18 @@ export default function RecruiterCandidates() {
                               </div>
                               <div>
                                 <span className="text-slate-500">Association Status:</span>
-                                <p className="font-medium text-slate-800 capitalize">{assoc.status}</p>
+                                <p className="font-medium text-slate-800">
+                                  {(() => {
+                                    const s = assoc.status || 'submitted';
+                                    if (assoc.is_discarded) return 'Discarded';
+                                    if (s === 'rm_evaluation') return 'Pending Evaluation';
+                                    if (s === 'submitted') return 'Submitted to AM';
+                                    if (s === 'client_submitted') return 'Submitted to Client';
+                                    if (s === 'client_rejected') return 'Client Rejected';
+                                    if (s === 'deal') return 'Deal';
+                                    return 'In Play';
+                                  })()}
+                                </p>
                               </div>
                             </div>
                             {assoc.is_discarded && (
@@ -394,17 +742,161 @@ export default function RecruiterCandidates() {
                               </div>
                             )}
                           </div>
-                          {assoc.is_discarded && (
-                            <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-semibold">
-                              Discarded
+                          <div className="flex flex-col items-end gap-2">
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${chipClass(assoc)}`} title={chipLabel(assoc)}>
+                              {chipLabel(assoc)}
                             </span>
-                          )}
+                            {assoc.is_discarded !== 1 && (
+                              <button
+                                onClick={() => handleDiscardAssociation(candidateDetails.candidate.id, assoc.role_id)}
+                                className="px-3 py-1 text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-2 text-xs font-medium"
+                                title="Discard from this role"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Discard
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ));
+                  })()}
+                </div>
+              )}
+            </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showDiscardModal && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-lg border border-slate-200 p-6">
+            <div className="mb-4">
+              <h3 className="text-xl font-semibold text-slate-800">Discard Reason</h3>
+              <p className="text-sm text-slate-600 mt-1">Provide a reason for discarding (optional)</p>
+            </div>
+            <div>
+              <input
+                type="text"
+                value={discardReason}
+                onChange={(e) => setDiscardReason(e.target.value)}
+                placeholder="Reason"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              />
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={cancelDiscard}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDiscard}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700"
+              >
+                Confirm Discard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isAssocExportOpen && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-lg border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-slate-800">Export Associations</h3>
+              <button
+                onClick={() => setIsAssocExportOpen(false)}
+                className="p-2 rounded-md hover:bg-slate-100"
+                title="Close"
+              >
+                <XCircle className="w-5 h-5 text-slate-600" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-72 overflow-auto">
+              {assocAllExportFields.map((f) => (
+                <label key={f} className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={assocExportFields.includes(f)}
+                    onChange={() => toggleAssocField(f)}
+                  />
+                  <span className="text-sm text-slate-700">{assocFieldLabels[f] || f}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 mt-4">
+              <button
+                onClick={selectAllAssocFields}
+                className="px-3 py-2 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Select All
+              </button>
+              <button
+                onClick={clearAllAssocFields}
+                className="px-3 py-2 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="mt-6 space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={assocPresetName}
+                  onChange={(e) => setAssocPresetName(e.target.value)}
+                  placeholder="Preset name"
+                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                />
+                <button
+                  onClick={saveAssocPreset}
+                  className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                >
+                  Save Preset
+                </button>
               </div>
+              {assocExportPresets.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <select
+                    onChange={(e) => applyAssocPresetByName(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    defaultValue=""
+                  >
+                    <option value="">Apply Preset</option>
+                    {assocExportPresets.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const name = assocPresetName.trim();
+                      if (name) deleteAssocPresetByName(name);
+                    }}
+                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  >
+                    Delete Preset
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setIsAssocExportOpen(false)}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={exportAssocSelectedCsv}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                title="Export Selected"
+              >
+                <Download className="w-4 h-4" />
+                Export Selected
+              </button>
             </div>
           </div>
         </div>

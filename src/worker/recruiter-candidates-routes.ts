@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { HonoContext } from './types';
+import { createNotification } from './notification-routes';
 
 const app = new Hono<HonoContext>();
 
@@ -219,6 +220,14 @@ app.post('/candidates/:id/discard', async (c) => {
     const user = c.get('user');
     const candidateId = c.req.param('id');
     const db = c.env.DB;
+    let reasonText: string | null = null;
+    try {
+      const body = await c.req.json();
+      const r = (body as any)?.reason;
+      if (typeof r === 'string' && r.trim().length > 0) {
+        reasonText = `Candidate globally discarded: ${r.trim()}`;
+      }
+    } catch {}
 
     const candidate = await db.prepare(`
       SELECT * FROM candidates WHERE id = ? AND created_by_user_id = ?
@@ -241,10 +250,10 @@ app.post('/candidates/:id/discard', async (c) => {
       SET is_discarded = 1, 
           is_lost_role = 0,
           discarded_at = CURRENT_TIMESTAMP,
-          discarded_reason = 'Candidate globally discarded',
+          discarded_reason = COALESCE(?, 'Candidate globally discarded'),
           updated_at = CURRENT_TIMESTAMP
       WHERE candidate_id = ? AND recruiter_user_id = ? AND is_discarded = 0
-    `).bind(candidateId, user.id).run();
+    `).bind(reasonText, candidateId, user.id).run();
 
     return c.json({ message: 'Candidate discarded successfully' });
   } catch (error: any) {
@@ -285,7 +294,7 @@ app.post('/candidates/:id/restore', async (c) => {
       WHERE candidate_id = ? 
         AND recruiter_user_id = ? 
         AND is_discarded = 1 
-        AND discarded_reason = 'Candidate globally discarded'
+        AND discarded_reason LIKE 'Candidate globally discarded%'
     `).bind(candidateId, user.id).run();
 
     return c.json({ message: 'Candidate restored successfully' });
@@ -393,9 +402,149 @@ app.post('/candidates/:candidateId/roles/:roleId/discard', async (c) => {
         AND recruiter_user_id = ?
     `).bind(reason || null, candidateId, roleId, user.id).run();
 
-    return c.json({ message: 'Candidate discarded from role successfully' });
+  return c.json({ message: 'Candidate discarded from role successfully' });
+} catch (error: any) {
+  console.error('Error discarding candidate from role:', error);
+  return c.json({ error: error.message }, 500);
+}
+});
+
+app.post('/stale-notifications', async (c) => {
+  try {
+    const user = c.get('user');
+    const db = c.env.DB;
+
+    const rows = await db.prepare(`
+      SELECT 
+        cra.id as assoc_id,
+        cra.status as assoc_status,
+        c.name as candidate_name,
+        r.role_code,
+        r.title as role_title
+      FROM candidate_role_associations cra
+      INNER JOIN candidates c ON cra.candidate_id = c.id
+      INNER JOIN am_roles r ON cra.role_id = r.id
+      WHERE cra.recruiter_user_id = ?
+        AND cra.is_discarded = 0
+        AND cra.status IN ('submitted','rm_evaluation','client_submitted')
+        AND datetime(cra.updated_at) <= datetime('now','-7 day')
+    `).bind(user.id).all();
+
+    for (const row of rows.results || []) {
+      const assocId = (row as any).assoc_id;
+      const disabled = await db.prepare(`
+        SELECT 1 FROM notifications 
+        WHERE user_id = ? 
+          AND type = 'stale_disabled'
+          AND related_entity_type = 'candidate_role_association' 
+          AND related_entity_id = ?
+        LIMIT 1
+      `).bind(user.id, assocId).first();
+      if (disabled) {
+        continue;
+      }
+
+      const snooze = await db.prepare(`
+        SELECT message, created_at FROM notifications 
+        WHERE user_id = ?
+          AND type = 'stale_snooze'
+          AND related_entity_type = 'candidate_role_association'
+          AND related_entity_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).bind(user.id, assocId).first();
+      if (snooze) {
+        const msg = (snooze as any).message || '';
+        const until = msg.startsWith('snoozed_until:') ? msg.replace('snoozed_until:', '') : null;
+        if (until && new Date(until).getTime() > Date.now()) {
+          continue;
+        }
+      }
+
+      const exists = await db.prepare(`
+        SELECT 1 FROM notifications 
+        WHERE user_id = ? 
+          AND related_entity_type = 'candidate_role_association' 
+          AND related_entity_id = ? 
+          AND datetime(created_at) >= datetime('now','-7 day')
+        LIMIT 1
+      `).bind(user.id, assocId).first();
+
+      if (!exists) {
+        const candidateName = (row as any).candidate_name;
+        const roleCode = (row as any).role_code;
+        await createNotification(db, {
+          userId: user.id,
+          type: 'system',
+          title: 'Candidate status unchanged for 7 days',
+          message: `Candidate ${candidateName} for role ${roleCode} has no updates in 7+ days. Inform the candidate or snooze this reminder.`,
+          relatedEntityType: 'candidate_role_association',
+          relatedEntityId: assocId
+        });
+      }
+    }
+
+    return c.json({ success: true, checked: (rows.results || []).length });
   } catch (error: any) {
-    console.error('Error discarding candidate from role:', error);
+    console.error('Error creating stale notifications:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+app.post('/stale-notifications/:assocId/snooze', async (c) => {
+  try {
+    const user = c.get('user');
+    const db = c.env.DB;
+    const assocId = Number(c.req.param('assocId'));
+    const body = await c.req.json();
+    const days = Math.max(1, Math.min(30, Number((body as any)?.days || 7)));
+    const untilDate = new Date(Date.now() + days * 24 * 3600 * 1000).toISOString();
+
+    await createNotification(db, {
+      userId: (user as any).id,
+      type: 'stale_snooze',
+      title: 'Stale reminder snoozed',
+      message: `snoozed_until:${untilDate}`,
+      relatedEntityType: 'candidate_role_association',
+      relatedEntityId: assocId
+    });
+
+    return c.json({ success: true, snoozed_until: untilDate });
+  } catch (error: any) {
+    console.error('Error snoozing stale notification:', error);
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+app.post('/stale-notifications/:assocId/disable', async (c) => {
+  try {
+    const user = c.get('user');
+    const db = c.env.DB;
+    const assocId = Number(c.req.param('assocId'));
+
+    const existing = await db.prepare(`
+      SELECT 1 FROM notifications 
+      WHERE user_id = ? 
+        AND type = 'stale_disabled'
+        AND related_entity_type = 'candidate_role_association'
+        AND related_entity_id = ?
+      LIMIT 1
+    `).bind((user as any).id, assocId).first();
+
+    if (!existing) {
+      await createNotification(db, {
+        userId: (user as any).id,
+        type: 'stale_disabled',
+        title: 'Stale reminders disabled',
+        message: 'disabled:true',
+        relatedEntityType: 'candidate_role_association',
+        relatedEntityId: assocId
+      });
+    }
+
+    return c.json({ success: true });
+  } catch (error: any) {
+    console.error('Error disabling stale notification:', error);
     return c.json({ error: error.message }, 500);
   }
 });

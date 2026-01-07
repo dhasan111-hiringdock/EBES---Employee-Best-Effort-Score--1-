@@ -41,6 +41,8 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0]);
   const [dropoutReason, setDropoutReason] = useState("");
+  const [roleCandidates, setRoleCandidates] = useState<Array<{ candidate_id: number; candidate_code: string; candidate_name: string; association_status: string }>>([]);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
   
   // Dropdown role selection modal
   const [showDropoutModal, setShowDropoutModal] = useState(false);
@@ -73,6 +75,27 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
     }
   };
 
+  useEffect(() => {
+    const fetchCandidates = async () => {
+      if (!selectedRole) {
+        setRoleCandidates([]);
+        setSelectedCandidateId(null);
+        return;
+      }
+      try {
+        const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates`);
+        if (resp.ok) {
+          const data = await resp.json();
+          setRoleCandidates(data);
+          setSelectedCandidateId(null);
+        }
+      } catch (e) {
+        console.error("Failed to fetch role candidates:", e);
+      }
+    };
+    fetchCandidates();
+  }, [selectedRole]);
+
   const handleSubmit = async () => {
     if (!selectedRole || !client) return;
 
@@ -80,6 +103,24 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
     setError(null);
     try {
       if (entryType === "deal") {
+        if (!selectedCandidateId) {
+          setError("Please select a candidate for this role");
+          return;
+        }
+        const assocResp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates/${selectedCandidateId}/deal`, {
+          method: "POST",
+        });
+        if (!assocResp.ok) {
+          try {
+            const ct = assocResp.headers.get('content-type') || '';
+            const isJson = ct.includes('application/json');
+            const data = isJson ? await assocResp.json() : await assocResp.text();
+            setError((data as any)?.error || 'Failed to associate deal with candidate');
+          } catch {
+            setError('Failed to associate deal with candidate');
+          }
+          return;
+        }
         // Submit deal entry
         const resp = await fetchWithAuth("/api/recruiter/submissions", {
           method: "POST",
@@ -105,6 +146,11 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
         }
       } else {
         // Submit dropout entry
+        if (!selectedCandidateId) {
+          setError("Please select a candidate for this role");
+          return;
+        }
+        const candidate = roleCandidates.find(c => c.candidate_id === selectedCandidateId);
         const roleDetails = dealRoles.find(r => r.id === selectedRole.id);
         if (roleDetails) {
           const resp = await fetchWithAuth("/api/recruiter/submissions", {
@@ -118,6 +164,7 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
               role_id: roleDetails.id,
               submission_date: entryDate,
               notes: "",
+              candidate_name: candidate ? candidate.candidate_name : undefined,
             }),
           });
           if (!resp.ok) {
@@ -330,6 +377,29 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                               <p className="text-xs text-slate-600">
                                 Account Manager: <span className="font-medium">{selectedRole.account_manager_name}</span>
                               </p>
+                              <div className="mt-4">
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                  Select Candidate *
+                                </label>
+                                {roleCandidates.length > 0 ? (
+                                  <select
+                                    value={selectedCandidateId ?? ""}
+                                    onChange={(e) => setSelectedCandidateId(e.target.value ? parseInt(e.target.value) : null)}
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                                  >
+                                    <option value="" disabled>Select a candidate</option>
+                                    {roleCandidates.map((c) => (
+                                      <option key={c.candidate_id} value={c.candidate_id}>
+                                        {c.candidate_name} ({c.candidate_code}) • {c.association_status}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <div className="text-sm text-slate-500">
+                                    No associated candidates found for this role
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -384,6 +454,29 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                           <p className="text-sm text-amber-800">
                             <strong>Note:</strong> This indicates a consultant was offered the role but declined it. Only your Account Manager can modify this role afterward.
                           </p>
+                          <div className="mt-4">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                              Select Candidate *
+                            </label>
+                            {roleCandidates.length > 0 ? (
+                              <select
+                                value={selectedCandidateId ?? ""}
+                                onChange={(e) => setSelectedCandidateId(e.target.value ? parseInt(e.target.value) : null)}
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                              >
+                                <option value="" disabled>Select a candidate</option>
+                                {roleCandidates.map((c) => (
+                                  <option key={c.candidate_id} value={c.candidate_id}>
+                                    {c.candidate_name} ({c.candidate_code}) • {c.association_status}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="text-sm text-slate-500">
+                                No associated candidates found for this role
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </>
@@ -431,7 +524,7 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={submitting || !selectedRole || (entryType === "dropout" && !dropoutReason.trim())}
+                  disabled={submitting || !selectedRole || !selectedCandidateId || (entryType === "dropout" && !dropoutReason.trim())}
                   className={`flex-1 px-6 py-3 ${
                     entryType === "deal"
                       ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"

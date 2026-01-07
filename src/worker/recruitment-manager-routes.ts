@@ -34,6 +34,124 @@ const rmOnly = async (c: any, next: any) => {
   }
 };
 
+// Pending submissions count for RM
+app.get("/api/rm/pending-submissions-count", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  try {
+    const teamRows = await db
+      .prepare(`
+        SELECT t.id FROM app_teams t
+        INNER JOIN team_assignments ta ON t.id = ta.team_id
+        WHERE ta.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const clientRows = await db
+      .prepare(`
+        SELECT c.id FROM clients c
+        INNER JOIN client_assignments ca ON c.id = ca.client_id
+        WHERE ca.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const teamIds = (teamRows.results || []).map((t: any) => t.id);
+    const clientIds = (clientRows.results || []).map((c2: any) => c2.id);
+
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      return c.json({ count: 0 });
+    }
+
+    let where = `cra.status = 'rm_evaluation' AND cra.is_discarded = 0`;
+    const filters: string[] = [];
+    if (teamIds.length > 0) filters.push(`r.team_id IN (${teamIds.join(",")})`);
+    if (clientIds.length > 0) filters.push(`r.client_id IN (${clientIds.join(",")})`);
+    if (filters.length > 0) where += ` AND (${filters.join(" OR ")})`;
+
+    const row = await db
+      .prepare(`
+        SELECT COUNT(*) as count
+        FROM candidate_role_associations cra
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        WHERE ${where}
+      `)
+      .first();
+    return c.json({ count: (row as any)?.count || 0 });
+  } catch (error) {
+    return c.json({ error: "Failed to fetch pending submissions count" }, 500);
+  }
+});
+
+// Pending submissions list for RM
+app.get("/api/rm/pending-submissions", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  try {
+    const qLimit = Number(c.req.query('limit') || '100');
+    const limit = Math.max(1, Math.min(qLimit, 500));
+    const teamRows = await db
+      .prepare(`
+        SELECT t.id FROM app_teams t
+        INNER JOIN team_assignments ta ON t.id = ta.team_id
+        WHERE ta.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const clientRows = await db
+      .prepare(`
+        SELECT c.id FROM clients c
+        INNER JOIN client_assignments ca ON c.id = ca.client_id
+        WHERE ca.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+
+    const teamIds = (teamRows.results || []).map((t: any) => t.id);
+    const clientIds = (clientRows.results || []).map((c2: any) => c2.id);
+
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      return c.json([]);
+    }
+
+    let filter = "";
+    if (teamIds.length > 0 && clientIds.length > 0) {
+      filter = `AND (r.team_id IN (${teamIds.join(",")}) OR r.client_id IN (${clientIds.join(",")}))`;
+    } else if (teamIds.length > 0) {
+      filter = `AND r.team_id IN (${teamIds.join(",")})`;
+    } else if (clientIds.length > 0) {
+      filter = `AND r.client_id IN (${clientIds.join(",")})`;
+    }
+
+    const rows = await db
+      .prepare(`
+        SELECT 
+          cra.role_id,
+          r.title as role_title,
+          r.role_code,
+          cl.name as client_name,
+          cra.candidate_id,
+          c.name as candidate_name,
+          c.email as candidate_email,
+          c.phone as candidate_phone,
+          cra.submission_date
+        FROM candidate_role_associations cra
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        INNER JOIN clients cl ON cl.id = r.client_id
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        WHERE cra.status = 'rm_evaluation' AND cra.is_discarded = 0
+        ${filter}
+        ORDER BY cra.submission_date DESC
+        LIMIT ${limit}
+      `)
+      .all();
+
+    return c.json(rows.results || []);
+  } catch (error) {
+    console.error("Error fetching pending submissions:", error);
+    return c.json({ error: "Failed to fetch pending submissions" }, 500);
+  }
+});
+
 // Get assigned teams
 app.get("/api/rm/teams", rmOnly, async (c) => {
   const db = c.env.DB;
@@ -332,9 +450,12 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
         (SELECT SUM(CASE WHEN cra.status = 'rm_evaluation' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
          WHERE cra.role_id = r.id) as under_evaluation,
-        (SELECT SUM(CASE WHEN cra.status IN ('client_submitted','client_rejected') AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
+        (SELECT SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
-         WHERE cra.role_id = r.id) as submitted_to_client,
+         WHERE cra.role_id = r.id) as under_client_evaluation,
+        (SELECT SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
+         FROM candidate_role_associations cra
+         WHERE cra.role_id = r.id) as client_rejected,
         (SELECT COUNT(DISTINCT cra.candidate_id) 
          FROM candidate_role_associations cra 
          WHERE cra.role_id = r.id AND cra.is_discarded = 0) as in_play_submissions,
@@ -2210,7 +2331,7 @@ app.put("/api/rm/submissions/:id/review", rmOnly, async (c) => {
       rm_work_type = COALESCE(?, rm_work_type),
       cv_match_percent = COALESCE(?, cv_match_percent),
       rm_notes = COALESCE(?, rm_notes),
-      rm_reviewed_at = CURRENT_TIMESTAMP,
+      rm_reviewed_at = COALESCE(?, CURRENT_TIMESTAMP),
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(
@@ -2221,6 +2342,7 @@ app.put("/api/rm/submissions/:id/review", rmOnly, async (c) => {
     workType,
     body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
     body.rm_notes || null,
+    body.rm_review_date || null,
     id
   ).run();
 
@@ -2372,6 +2494,45 @@ app.post("/api/rm/roles/:roleId/candidates/:candidateId/deal", rmOnly, async (c)
   `).bind(roleId, candidateId).run();
 
   return c.json({ success: true });
+});
+
+// RM daily custom report
+app.get("/api/rm/reports/daily", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  const ta = await db
+    .prepare("SELECT team_id FROM team_assignments WHERE user_id = ?")
+    .bind((rmUser as any).id)
+    .all();
+  const teamIds = (ta.results || []).map((r: any) => (r as any).team_id);
+  if (teamIds.length === 0) {
+    return c.json({
+      day_before_yesterday: { roles_created: 0, submissions: 0, forwarded_to_client: 0, client_rejected: 0, interviews: 0, deals: 0, discarded: 0 },
+      yesterday: { roles_created: 0, submissions: 0, forwarded_to_client: 0, client_rejected: 0, interviews: 0, deals: 0, discarded: 0 }
+    });
+  }
+  const ids = teamIds.join(",");
+  const countsFor = async (offset: string) => {
+    const rolesCreated = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE team_id IN (${ids}) AND DATE(created_at) = DATE('now', ?)`).bind(offset).first();
+    const submissions = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND is_discarded = 0 AND DATE(submission_date) = DATE('now', ?)`).bind(offset).first();
+    const forwardedToClient = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND status = 'client_submitted' AND is_discarded = 0 AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const clientRejected = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND status = 'client_rejected' AND is_discarded = 0 AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const deals = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND status = 'deal' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const discarded = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND is_discarded = 1 AND DATE(discarded_at) = DATE('now', ?)`).bind(offset).first();
+    const interviews = await db.prepare(`SELECT COUNT(*) as c FROM recruiter_submissions rs INNER JOIN am_roles ar ON rs.role_id = ar.id WHERE ar.team_id IN (${ids}) AND rs.entry_type = 'interview' AND DATE(rs.submission_date) = DATE('now', ?)`).bind(offset).first();
+    return {
+      roles_created: Number((rolesCreated as any)?.c || 0),
+      submissions: Number((submissions as any)?.c || 0),
+      forwarded_to_client: Number((forwardedToClient as any)?.c || 0),
+      client_rejected: Number((clientRejected as any)?.c || 0),
+      interviews: Number((interviews as any)?.c || 0),
+      deals: Number((deals as any)?.c || 0),
+      discarded: Number((discarded as any)?.c || 0),
+    };
+  };
+  const day_before_yesterday = await countsFor("-2 day");
+  const yesterday = await countsFor("-1 day");
+  return c.json({ day_before_yesterday, yesterday });
 });
 
 export default app;

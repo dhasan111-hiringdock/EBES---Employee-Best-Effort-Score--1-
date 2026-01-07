@@ -27,9 +27,13 @@ export default function RMDashboard() {
   const [quickStats, setQuickStats] = useState<QuickStats | null>(null);
   const [pendingDropouts, setPendingDropouts] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [newSubmissionsCount, setNewSubmissionsCount] = useState(0);
+  const [pendingList, setPendingList] = useState<Array<any>>([]);
 
   useEffect(() => {
     fetchDashboardData();
+    fetchNewSubmissionNotifications();
+    fetchPendingList();
   }, []);
 
  
@@ -74,6 +78,30 @@ export default function RMDashboard() {
     }
   };
 
+  const fetchPendingList = async () => {
+    try {
+      const res = await fetchWithAuth('/api/rm/pending-submissions?limit=100');
+      if (res.ok) {
+        setPendingList(await res.json());
+      }
+    } catch {}
+  };
+
+  const fetchNewSubmissionNotifications = async () => {
+    try {
+      const res = await fetchWithAuth('/api/notifications?unread_only=true&limit=50');
+      if (res.ok) {
+        const items = await res.json();
+        const count = (items || []).filter(
+          (n: any) => (n as any).type === 'system' && (n as any).title === 'Submission Received'
+        ).length;
+        setNewSubmissionsCount(count);
+      }
+    } catch (e) {
+      console.error('Failed to fetch new submission notifications:', e);
+    }
+  };
+
   const getPerformanceColor = (label: string) => {
     switch (label) {
       case 'Excellent': return 'from-emerald-500 to-green-500';
@@ -99,6 +127,70 @@ export default function RMDashboard() {
         <h2 className="text-3xl font-bold text-slate-800">Dashboard</h2>
         <p className="text-slate-600 mt-1">Overview of your team's performance this month</p>
       </div>
+
+      {/* New Submissions Banner */}
+      {newSubmissionsCount > 0 && (
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 backdrop-blur-sm rounded-lg">
+                <Briefcase className="w-8 h-8" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold mb-1">New Submissions</h3>
+                <p className="text-indigo-100">
+                  You have {newSubmissionsCount} new {newSubmissionsCount === 1 ? 'submission' : 'submissions'} waiting for evaluation
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/rm/roles"
+              className="px-6 py-3 bg-white text-indigo-700 font-semibold rounded-lg hover:bg-indigo-50 transition-colors shadow-lg"
+            >
+              Review Submissions
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {pendingList.length > 0 && (
+        <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center">
+                <Briefcase className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-slate-800">Pending Evaluation</h3>
+                <p className="text-sm text-slate-500">Latest candidate submissions</p>
+              </div>
+            </div>
+            <Link to="/rm/roles" className="text-indigo-600 hover:text-indigo-700 font-medium">
+              Go to Roles
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {pendingList.slice(0, 8).map((item, idx) => (
+              <Link
+                key={`${item.role_id}-${item.candidate_id}-${idx}`}
+                to={`/rm/roles?roleId=${item.role_id}`}
+                className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{item.candidate_name}</p>
+                    <p className="text-xs text-slate-500">Submitted on {new Date(item.submission_date).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-slate-700">{item.role_title}</p>
+                  <p className="text-xs text-slate-500 font-mono">{item.role_code} • {item.client_name}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Pending Dropouts Alert */}
       {pendingDropouts > 0 && (

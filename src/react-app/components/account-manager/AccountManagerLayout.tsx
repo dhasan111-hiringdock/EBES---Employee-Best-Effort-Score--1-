@@ -38,10 +38,12 @@ export default function AccountManagerLayout({
   const { user, logout } = useAuth();
   const [showCompanyPage, setShowCompanyPage] = useState(true);
   const [pendingDropoutsCount, setPendingDropoutsCount] = useState(0);
+  const [pendingSubmissionsCount, setPendingSubmissionsCount] = useState(0);
 
   useEffect(() => {
     fetchCompanySettings();
     fetchPendingDropouts();
+    fetchPendingSubmissions();
   }, []);
 
   const fetchCompanySettings = async () => {
@@ -68,8 +70,21 @@ export default function AccountManagerLayout({
     }
   };
 
+  const fetchPendingSubmissions = async () => {
+    try {
+      const response = await fetchWithAuth('/api/am/pending-submissions-count');
+      if (response.ok) {
+        const data = await response.json();
+        setPendingSubmissionsCount(data.count || 0);
+      }
+    } catch (error) {
+      console.error('Failed to fetch pending submissions:', error);
+    }
+  };
+
   const navItems = [
     { path: "/am", icon: Target, label: "Dashboard" },
+    { path: "/am/daily-report", icon: BarChart3, label: "Daily Report" },
     { path: "/am/roles", icon: Briefcase, label: "Roles" },
     { path: "/am/pipeline", icon: RefreshCw, label: "Pipe" },
     { path: "/am/analytics", icon: BarChart3, label: "Analytics" },
@@ -164,6 +179,7 @@ export default function AccountManagerLayout({
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             const isDropoutTab = item.path === "/am/dropouts";
+            const isRolesTab = item.path === "/am/roles";
             
             return (
               <Link
@@ -184,6 +200,11 @@ export default function AccountManagerLayout({
                 {isDropoutTab && pendingDropoutsCount > 0 && (
                   <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full min-w-[20px] text-center">
                     {pendingDropoutsCount}
+                  </span>
+                )}
+                {isRolesTab && pendingSubmissionsCount > 0 && (
+                  <span className="ml-auto px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full min-w-[20px] text-center">
+                    {pendingSubmissionsCount}
                   </span>
                 )}
               </Link>
