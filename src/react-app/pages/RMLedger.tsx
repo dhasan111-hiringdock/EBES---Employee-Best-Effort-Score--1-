@@ -2,12 +2,12 @@ import { useState, useEffect } from "react";
 import { FileText, Search, Filter, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
-export default function RecruiterLedger() {
+export default function RMLedger() {
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('month');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [search, setSearch] = useState<string>('');
-  const [eventType, setEventType] = useState<'all' | 'submission' | 'rm_evaluation' | 'submitted' | 'client_submitted' | 'client_rejected' | 'interview' | 'deal' | 'discarded' | 'dropout'>('all');
+  const [eventType, setEventType] = useState<'all' | 'rm_evaluation' | 'submitted' | 'client_submitted' | 'client_rejected' | 'interview' | 'deal' | 'discarded' | 'dropout'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_play' | 'positive' | 'negative'>('all');
   const [loading, setLoading] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'excel' | 'pdf'>('csv');
@@ -42,7 +42,7 @@ export default function RecruiterLedger() {
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (search.trim()) params.append('search', search.trim());
       params.append('format', exportFormat);
-      const res = await fetchWithAuth(`/api/recruiter/ledger/export?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/rm/ledger/export?${params.toString()}`);
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -51,13 +51,13 @@ export default function RecruiterLedger() {
           if (!w) {
             const a = document.createElement('a');
             a.href = url;
-            a.download = `submissions-ledger.html`;
+            a.download = `rm-submissions-ledger.html`;
             a.click();
           }
         } else {
           const a = document.createElement('a');
           a.href = url;
-          a.download = exportFormat === 'excel' ? `submissions-ledger.xls` : `submissions-ledger.csv`;
+          a.download = exportFormat === 'excel' ? `rm-submissions-ledger.xls` : `rm-submissions-ledger.csv`;
           a.click();
         }
         URL.revokeObjectURL(url);
@@ -82,7 +82,7 @@ export default function RecruiterLedger() {
     const ps = targetPageSize ?? pageSize;
     params.append('page', String(pg));
     params.append('page_size', String(ps));
-    const res = await fetchWithAuth(`/api/recruiter/ledger?${params.toString()}`);
+    const res = await fetchWithAuth(`/api/rm/ledger?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
       setEntries(data.events || []);
@@ -150,7 +150,6 @@ export default function RecruiterLedger() {
             title="Event Type"
           >
             <option value="all">Event: All</option>
-            <option value="submission">Submission</option>
             <option value="rm_evaluation">Pending Evaluation</option>
             <option value="submitted">Submitted to AM</option>
             <option value="client_submitted">Submitted to Client</option>

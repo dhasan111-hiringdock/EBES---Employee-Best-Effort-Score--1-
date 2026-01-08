@@ -2,12 +2,12 @@ import { useState, useEffect } from "react";
 import { FileText, Search, Filter, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
-export default function RecruiterLedger() {
+export default function AMLedger() {
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('month');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [search, setSearch] = useState<string>('');
-  const [eventType, setEventType] = useState<'all' | 'submission' | 'rm_evaluation' | 'submitted' | 'client_submitted' | 'client_rejected' | 'interview' | 'deal' | 'discarded' | 'dropout'>('all');
+  const [eventType, setEventType] = useState<'all' | 'submitted' | 'client_submitted' | 'client_rejected' | 'interview' | 'deal' | 'discarded' | 'dropout'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_play' | 'positive' | 'negative'>('all');
   const [loading, setLoading] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'excel' | 'pdf'>('csv');
@@ -42,7 +42,7 @@ export default function RecruiterLedger() {
       if (statusFilter !== 'all') params.append('status', statusFilter);
       if (search.trim()) params.append('search', search.trim());
       params.append('format', exportFormat);
-      const res = await fetchWithAuth(`/api/recruiter/ledger/export?${params.toString()}`);
+      const res = await fetchWithAuth(`/api/am/ledger/export?${params.toString()}`);
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -51,13 +51,13 @@ export default function RecruiterLedger() {
           if (!w) {
             const a = document.createElement('a');
             a.href = url;
-            a.download = `submissions-ledger.html`;
+            a.download = `am-submissions-ledger.html`;
             a.click();
           }
         } else {
           const a = document.createElement('a');
           a.href = url;
-          a.download = exportFormat === 'excel' ? `submissions-ledger.xls` : `submissions-ledger.csv`;
+          a.download = exportFormat === 'excel' ? `am-submissions-ledger.xls` : `am-submissions-ledger.csv`;
           a.click();
         }
         URL.revokeObjectURL(url);
@@ -82,7 +82,7 @@ export default function RecruiterLedger() {
     const ps = targetPageSize ?? pageSize;
     params.append('page', String(pg));
     params.append('page_size', String(ps));
-    const res = await fetchWithAuth(`/api/recruiter/ledger?${params.toString()}`);
+    const res = await fetchWithAuth(`/api/am/ledger?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
       setEntries(data.events || []);
@@ -101,11 +101,12 @@ export default function RecruiterLedger() {
   useEffect(() => {
     fetchLedger(page, pageSize);
   }, [page, pageSize]);
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <FileText className="w-5 h-5 text-indigo-600" />
+          <FileText className="w-5 h-5 text-emerald-600" />
           <h2 className="text-3xl font-bold text-slate-800">Submissions Ledger</h2>
         </div>
         <div className="flex items-center gap-2">
@@ -140,7 +141,7 @@ export default function RecruiterLedger() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search by candidate, role, client..."
-              className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
           </div>
           <select
@@ -150,8 +151,6 @@ export default function RecruiterLedger() {
             title="Event Type"
           >
             <option value="all">Event: All</option>
-            <option value="submission">Submission</option>
-            <option value="rm_evaluation">Pending Evaluation</option>
             <option value="submitted">Submitted to AM</option>
             <option value="client_submitted">Submitted to Client</option>
             <option value="client_rejected">Client Rejected</option>

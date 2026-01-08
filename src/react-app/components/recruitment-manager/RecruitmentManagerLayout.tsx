@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { LayoutDashboard, UserCircle, Target, LogOut, Users, BarChart3, TrendingUp, AlertTriangle, Inbox } from "lucide-react";
+import { LayoutDashboard, UserCircle, Target, LogOut, Users, BarChart3, TrendingUp, AlertTriangle, Inbox, FileText } from "lucide-react";
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
@@ -63,6 +63,7 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
     { path: "/rm/analytics", icon: BarChart3, label: "Analytics" },
     { path: "/rm/roles", icon: Target, label: "Roles" },
     { path: "/rm/submissions", icon: Inbox, label: "Submissions" },
+    { path: "/rm/ledger", icon: FileText, label: "Submissions Ledger" },
     { path: "/rm/pipeline", icon: LayoutDashboard, label: "Pipe" },
     { path: "/rm/team", icon: Users, label: "Team Management" },
     { path: "/rm/dropouts", icon: AlertTriangle, label: "Dropout Requests" },

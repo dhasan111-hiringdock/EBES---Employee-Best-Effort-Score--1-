@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { Building2, Users, RefreshCw, BarChart3, Briefcase, UserCircle, Target, LogOut, TrendingUp, AlertTriangle, Inbox } from "lucide-react";
+import { Building2, Users, RefreshCw, BarChart3, Briefcase, UserCircle, Target, LogOut, TrendingUp, AlertTriangle, Inbox, FileText } from "lucide-react";
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
@@ -87,6 +87,7 @@ export default function AccountManagerLayout({
     { path: "/am/daily-report", icon: BarChart3, label: "Daily Report" },
     { path: "/am/roles", icon: Briefcase, label: "Roles" },
     { path: "/am/submissions", icon: Inbox, label: "Submissions" },
+    { path: "/am/ledger", icon: FileText, label: "Submissions Ledger" },
     { path: "/am/pipeline", icon: RefreshCw, label: "Pipe" },
     { path: "/am/analytics", icon: BarChart3, label: "Analytics" },
     { path: "/am/dropouts", icon: AlertTriangle, label: "Dropout Decisions" },

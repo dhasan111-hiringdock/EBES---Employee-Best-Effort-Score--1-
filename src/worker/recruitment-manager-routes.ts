@@ -3035,4 +3035,593 @@ app.post("/api/rm/seed/reset-and-populate", rmOnly, async (c) => {
   }
 });
 
+app.get("/api/rm/ledger/export", rmOnly, async (c) => {
+  try {
+    const db = c.env.DB;
+    const rmUser = c.get("rmUser");
+    const dateRange = c.req.query("date_range") || "month";
+    const startDateParam = c.req.query("start_date");
+    const endDateParam = c.req.query("end_date");
+    const eventTypeParam = c.req.query("event_type");
+    const statusFilterParam = c.req.query("status");
+    const searchParam = c.req.query("search");
+    const formatParam = c.req.query("format") || "csv";
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let startDate = todayStr;
+    let endDate = todayStr;
+    if (dateRange === "custom" && startDateParam && endDateParam) {
+      startDate = startDateParam;
+      endDate = endDateParam;
+    } else if (dateRange === "week") {
+      const start = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+      startDate = start;
+      endDate = todayStr;
+    } else if (dateRange === "month") {
+      const start = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+      startDate = start;
+      endDate = todayStr;
+    } else if (dateRange === "today") {
+      startDate = todayStr;
+      endDate = todayStr;
+    }
+    const allowedEventTypes = ["rm_evaluation", "submitted", "client_submitted", "client_rejected", "interview", "deal", "discarded", "dropout"];
+    const eventType = eventTypeParam && allowedEventTypes.includes(eventTypeParam) ? eventTypeParam : null;
+    const statusFilter = statusFilterParam && ["in_play", "positive", "negative"].includes(statusFilterParam) ? statusFilterParam : null;
+    const search = searchParam ? String(searchParam).trim() : "";
+    const teamRows = await db
+      .prepare(`
+        SELECT t.id FROM app_teams t
+        INNER JOIN team_assignments ta ON t.id = ta.team_id
+        WHERE ta.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const teamIds = (teamRows.results || []).map((t: any) => (t as any).id);
+    const clientRows = await db
+      .prepare(`
+        SELECT c.id FROM clients c
+        INNER JOIN client_assignments ca ON c.id = ca.client_id
+        WHERE ca.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).id);
+    let craWhere = "cra.is_discarded = 0";
+    const filters: string[] = [];
+    if (teamIds.length > 0) filters.push(`r.team_id IN (${teamIds.join(",")})`);
+    if (clientIds.length > 0) filters.push(`r.client_id IN (${clientIds.join(",")})`);
+    if (filters.length > 0) craWhere += ` AND (${filters.join(" OR ")})`;
+    let craDateClause = " AND ((cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?) OR (cra.status IN ('submitted','client_submitted','client_rejected') AND DATE(cra.updated_at) BETWEEN ? AND ?))";
+    let craDateParams: any[] = [startDate, endDate, startDate, endDate];
+    if (eventType && ["rm_evaluation", "submitted", "client_submitted", "client_rejected"].includes(eventType)) {
+      craDateClause =
+        eventType === "rm_evaluation"
+          ? " AND (cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?)"
+          : " AND (cra.status = ? AND DATE(cra.updated_at) BETWEEN ? AND ?)";
+      craDateParams =
+        eventType === "rm_evaluation"
+          ? [startDate, endDate]
+          : [eventType, startDate, endDate];
+    }
+    let craSearchClause = "";
+    let craSearchParams: any[] = [];
+    if (search.length > 0) {
+      craSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      craSearchParams = [like, like, like, like];
+    }
+    const craRows = eventType === "discarded"
+      ? { results: [] }
+      : await db
+          .prepare(
+            `
+            SELECT 
+              CASE 
+                WHEN cra.status = 'rm_evaluation' THEN DATE(cra.submission_date)
+                ELSE DATE(cra.updated_at)
+              END as event_date,
+              cra.status as event_type,
+              c.name as candidate_name,
+              r.title as role_title,
+              r.role_code as role_code,
+              cl.name as client_name,
+              t.name as team_name,
+              NULL as submission_type,
+              NULL as interview_level,
+              NULL as cv_match_percent,
+              NULL as notes
+            FROM candidate_role_associations cra
+            INNER JOIN candidates c ON c.id = cra.candidate_id
+            INNER JOIN am_roles r ON r.id = cra.role_id
+            INNER JOIN clients cl ON cl.id = r.client_id
+            INNER JOIN app_teams t ON t.id = r.team_id
+            WHERE ${craWhere}${craDateClause}${craSearchClause}
+            ORDER BY event_date DESC
+            `
+          )
+          .bind(...craDateParams, ...craSearchParams)
+          .all();
+    let discardedWhere = "cra.is_discarded = 1";
+    if (filters.length > 0) discardedWhere += ` AND (${filters.join(" OR ")})`;
+    const discardedParams: any[] = [startDate, endDate];
+    let discardedSearchClause = "";
+    let discardedSearchParams: any[] = [];
+    if (search.length > 0) {
+      discardedSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      discardedSearchParams = [like, like, like, like];
+    }
+    const discardedRows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(cra.discarded_at) as event_date,
+          'discarded' as event_type,
+          c.name as candidate_name,
+          r.title as role_title,
+          r.role_code as role_code,
+          cl.name as client_name,
+          t.name as team_name,
+          NULL as submission_type,
+          NULL as interview_level,
+          NULL as cv_match_percent,
+          cra.discarded_reason as notes
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        INNER JOIN clients cl ON cl.id = r.client_id
+        INNER JOIN app_teams t ON t.id = r.team_id
+        WHERE ${discardedWhere} AND DATE(cra.discarded_at) BETWEEN ? AND ?${discardedSearchClause}
+        ORDER BY cra.discarded_at DESC
+        `
+      )
+      .bind(...discardedParams, ...discardedSearchParams)
+      .all();
+    const rsBaseParams: any[] = [startDate, endDate];
+    let rsWhere = "DATE(rs.submission_date) BETWEEN ? AND ?";
+    if (teamIds.length > 0) {
+      rsWhere += ` AND rs.team_id IN (${teamIds.join(",")})`;
+    }
+    let rsEventClause = " AND rs.entry_type IN ('interview','deal')";
+    if (eventType && ["interview", "deal"].includes(eventType)) {
+      rsEventClause = " AND rs.entry_type = ?";
+      rsBaseParams.push(eventType);
+    }
+    let rsSearchClause = "";
+    let rsSearchParams: any[] = [];
+    if (search.length > 0) {
+      rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      rsSearchParams = [like, like, like, like];
+    }
+    const rsRows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(rs.submission_date) as event_date,
+          rs.entry_type as event_type,
+          rs.candidate_name,
+          ar.title as role_title,
+          ar.role_code as role_code,
+          cl.name as client_name,
+          t.name as team_name,
+          rs.submission_type,
+          rs.interview_level,
+          rs.cv_match_percent,
+          rs.notes
+        FROM recruiter_submissions rs
+        INNER JOIN am_roles ar ON rs.role_id = ar.id
+        INNER JOIN clients cl ON ar.client_id = cl.id
+        INNER JOIN app_teams t ON ar.team_id = t.id
+        WHERE ${rsWhere}${rsEventClause}${rsSearchClause}
+        ORDER BY rs.submission_date DESC
+        `
+      )
+      .bind(...rsBaseParams, ...rsSearchParams)
+      .all();
+    const dropoutBaseParams: any[] = [(rmUser as any).id, startDate, endDate];
+    let dropoutSearchClause = "";
+    let dropoutSearchParams: any[] = [];
+    if (search.length > 0) {
+      dropoutSearchClause = " AND (ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      dropoutSearchParams = [like, like, like];
+    }
+    const dropoutRows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(COALESCE(dr.rm_acknowledged_at, dr.created_at)) as event_date,
+          'dropout' as event_type,
+          NULL as candidate_name,
+          ar.title as role_title,
+          ar.role_code as role_code,
+          cl.name as client_name,
+          t.name as team_name,
+          NULL as submission_type,
+          NULL as interview_level,
+          NULL as cv_match_percent,
+          dr.dropout_reason as notes
+        FROM dropout_requests dr
+        INNER JOIN am_roles ar ON dr.role_id = ar.id
+        INNER JOIN clients cl ON ar.client_id = cl.id
+        INNER JOIN app_teams t ON ar.team_id = t.id
+        WHERE dr.rm_user_id = ? AND DATE(COALESCE(dr.rm_acknowledged_at, dr.created_at)) BETWEEN ? AND ?${dropoutSearchClause}
+        ORDER BY COALESCE(dr.rm_acknowledged_at, dr.created_at) DESC
+        `
+      )
+      .bind(...dropoutBaseParams, ...dropoutSearchParams)
+      .all();
+    let allEvents = [
+      ...(rsRows.results || []),
+      ...(craRows.results || []),
+      ...(discardedRows.results || []),
+      ...(dropoutRows.results || [])
+    ].map((r: any) => ({
+      event_date: (r as any).event_date,
+      event_type: (r as any).event_type,
+      candidate_name: (r as any).candidate_name || "",
+      role_title: (r as any).role_title || "",
+      role_code: (r as any).role_code || "",
+      client_name: (r as any).client_name || "",
+      team_name: (r as any).team_name || "",
+      submission_type: (r as any).submission_type || "",
+      interview_level: (r as any).interview_level != null ? String((r as any).interview_level) : "",
+      cv_match_percent: (r as any).cv_match_percent != null ? String((r as any).cv_match_percent) : "",
+      notes: (r as any).notes || ""
+    }));
+    if (eventType) {
+      allEvents = allEvents.filter((e) => e.event_type === eventType);
+    }
+    if (statusFilter === "in_play") {
+      allEvents = allEvents.filter((e) => e.event_type === "rm_evaluation" || e.event_type === "submitted" || e.event_type === "interview");
+    } else if (statusFilter === "positive") {
+      allEvents = allEvents.filter((e) => e.event_type === "client_submitted" || e.event_type === "deal" || e.event_type === "interview");
+    } else if (statusFilter === "negative") {
+      allEvents = allEvents.filter((e) => e.event_type === "client_rejected" || e.event_type === "discarded" || e.event_type === "dropout");
+    }
+    allEvents.sort((a, b) => {
+      const ad = new Date(a.event_date).getTime();
+      const bd = new Date(b.event_date).getTime();
+      return bd - ad;
+    });
+    const headers = ["Date", "Event", "Candidate", "Role", "Client", "Team", "SubmissionType", "InterviewLevel", "CVMatchPercent", "Notes"];
+    const rows = allEvents.map((e) => [
+      e.event_date || "",
+      e.event_type || "",
+      (e.candidate_name || "").replace(/,/g, " "),
+      ((e.role_title || "") + (e.role_code ? ` (${e.role_code})` : "")).replace(/,/g, " "),
+      (e.client_name || "").replace(/,/g, " "),
+      (e.team_name || "").replace(/,/g, " "),
+      e.submission_type || "",
+      e.interview_level || "",
+      e.cv_match_percent || "",
+      (e.notes || "").replace(/,/g, " ")
+    ].join(","));
+    if (formatParam === "excel") {
+      const csv = [headers.join(","), ...rows].join("\n");
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.ms-excel;charset=utf-8",
+          "Content-Disposition": `attachment; filename="rm-submissions-ledger.xls"`
+        }
+      });
+    }
+    if (formatParam === "pdf") {
+      const tableHead = headers.map((h) => `<th style="padding:8px;border:1px solid #ddd;text-align:left;font-weight:600">${h}</th>`).join("");
+      const tableRows = allEvents
+        .map((e) => {
+          const cells = [
+            e.event_date || "",
+            e.event_type || "",
+            e.candidate_name || "",
+            ((e.role_title || "") + (e.role_code ? ` (${e.role_code})` : "")) || "",
+            e.client_name || "",
+            e.team_name || "",
+            e.submission_type || "",
+            e.interview_level || "",
+            e.cv_match_percent || "",
+            e.notes || ""
+          ];
+          return `<tr>${cells.map((c) => `<td style="padding:8px;border:1px solid #ddd;">${String(c)}</td>`).join("")}</tr>`;
+        })
+        .join("");
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>RM Submissions Ledger</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto;font-size:12px;color:#111;padding:16px} h2{margin:0 0 12px} table{border-collapse:collapse;width:100%}</style></head><body><h2>Recruitment Manager Submissions Ledger</h2><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table><script>window.onload=function(){window.print&&window.print();}</script></body></html>`;
+      return new Response(html, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Disposition": `inline; filename="rm-submissions-ledger.html"`
+        }
+      });
+    }
+    const csv = [headers.join(","), ...rows].join("\n");
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv;charset=utf-8",
+        "Content-Disposition": `attachment; filename="rm-submissions-ledger.csv"`
+      }
+    });
+  } catch (error: any) {
+    console.error("RM Ledger export failed:", error);
+    return c.json({ error: "Failed to export RM ledger" }, 500);
+  }
+});
+
+app.get("/api/rm/ledger", rmOnly, async (c) => {
+  try {
+    const db = c.env.DB;
+    const rmUser = c.get("rmUser");
+    const dateRange = c.req.query("date_range") || "month";
+    const startDateParam = c.req.query("start_date");
+    const endDateParam = c.req.query("end_date");
+    const eventTypeParam = c.req.query("event_type");
+    const statusFilterParam = c.req.query("status");
+    const searchParam = c.req.query("search");
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let startDate = todayStr;
+    let endDate = todayStr;
+    if (dateRange === "custom" && startDateParam && endDateParam) {
+      startDate = startDateParam;
+      endDate = endDateParam;
+    } else if (dateRange === "week") {
+      const start = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+      startDate = start;
+      endDate = todayStr;
+    } else if (dateRange === "month") {
+      const start = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+      startDate = start;
+      endDate = todayStr;
+    } else if (dateRange === "today") {
+      startDate = todayStr;
+      endDate = todayStr;
+    }
+    const allowedEventTypes = ["rm_evaluation", "submitted", "client_submitted", "client_rejected", "interview", "deal", "discarded", "dropout"];
+    const eventType = eventTypeParam && allowedEventTypes.includes(eventTypeParam) ? eventTypeParam : null;
+    const statusFilter = statusFilterParam && ["in_play", "positive", "negative"].includes(statusFilterParam) ? statusFilterParam : null;
+    const search = searchParam ? String(searchParam).trim() : "";
+    const sortByParam = c.req.query("sort_by");
+    const sortOrderParam = c.req.query("sort_order") || "desc";
+    const pageParam = c.req.query("page");
+    const pageSizeParam = c.req.query("page_size");
+    const allowedSortBy = ["event_date", "event_type", "candidate_name", "role_title", "client_name", "team_name"];
+    const sortBy = sortByParam && allowedSortBy.includes(sortByParam) ? sortByParam : "event_date";
+    const sortDesc = String(sortOrderParam).toLowerCase() !== "asc";
+    const page = Math.max(1, parseInt(String(pageParam || "1"), 10));
+    const pageSize = Math.max(1, parseInt(String(pageSizeParam || "25"), 10));
+    const teamRows = await db
+      .prepare(`
+        SELECT t.id FROM app_teams t
+        INNER JOIN team_assignments ta ON t.id = ta.team_id
+        WHERE ta.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const teamIds = (teamRows.results || []).map((t: any) => (t as any).id);
+    const clientRows = await db
+      .prepare(`
+        SELECT c.id FROM clients c
+        INNER JOIN client_assignments ca ON c.id = ca.client_id
+        WHERE ca.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).id);
+    let craWhere = "cra.is_discarded = 0";
+    const filters: string[] = [];
+    if (teamIds.length > 0) filters.push(`r.team_id IN (${teamIds.join(",")})`);
+    if (clientIds.length > 0) filters.push(`r.client_id IN (${clientIds.join(",")})`);
+    if (filters.length > 0) craWhere += ` AND (${filters.join(" OR ")})`;
+    let craDateClause = " AND ((cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?) OR (cra.status IN ('submitted','client_submitted','client_rejected') AND DATE(cra.updated_at) BETWEEN ? AND ?))";
+    let craDateParams: any[] = [startDate, endDate, startDate, endDate];
+    if (eventType && ["rm_evaluation", "submitted", "client_submitted", "client_rejected"].includes(eventType)) {
+      craDateClause =
+        eventType === "rm_evaluation"
+          ? " AND (cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?)"
+          : " AND (cra.status = ? AND DATE(cra.updated_at) BETWEEN ? AND ?)";
+      craDateParams =
+        eventType === "rm_evaluation"
+          ? [startDate, endDate]
+          : [eventType, startDate, endDate];
+    }
+    let craSearchClause = "";
+    let craSearchParams: any[] = [];
+    if (search.length > 0) {
+      craSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      craSearchParams = [like, like, like, like];
+    }
+    const craRows = eventType === "discarded"
+      ? { results: [] }
+      : await db
+          .prepare(
+            `
+            SELECT 
+              CASE 
+                WHEN cra.status = 'rm_evaluation' THEN DATE(cra.submission_date)
+                ELSE DATE(cra.updated_at)
+              END as event_date,
+              cra.status as event_type,
+              c.name as candidate_name,
+              r.title as role_title,
+              r.role_code as role_code,
+              cl.name as client_name,
+              t.name as team_name,
+              NULL as submission_type,
+              NULL as interview_level,
+              NULL as cv_match_percent,
+              NULL as notes
+            FROM candidate_role_associations cra
+            INNER JOIN candidates c ON c.id = cra.candidate_id
+            INNER JOIN am_roles r ON r.id = cra.role_id
+            INNER JOIN clients cl ON cl.id = r.client_id
+            INNER JOIN app_teams t ON t.id = r.team_id
+            WHERE ${craWhere}${craDateClause}${craSearchClause}
+            ORDER BY event_date DESC
+            `
+          )
+          .bind(...craDateParams, ...craSearchParams)
+          .all();
+    let discardedWhere = "cra.is_discarded = 1";
+    if (filters.length > 0) discardedWhere += ` AND (${filters.join(" OR ")})`;
+    const discardedParams: any[] = [startDate, endDate];
+    let discardedSearchClause = "";
+    let discardedSearchParams: any[] = [];
+    if (search.length > 0) {
+      discardedSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      discardedSearchParams = [like, like, like, like];
+    }
+    const discardedRows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(cra.discarded_at) as event_date,
+          'discarded' as event_type,
+          c.name as candidate_name,
+          r.title as role_title,
+          r.role_code as role_code,
+          cl.name as client_name,
+          t.name as team_name,
+          NULL as submission_type,
+          NULL as interview_level,
+          NULL as cv_match_percent,
+          cra.discarded_reason as notes
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        INNER JOIN clients cl ON cl.id = r.client_id
+        INNER JOIN app_teams t ON t.id = r.team_id
+        WHERE ${discardedWhere} AND DATE(cra.discarded_at) BETWEEN ? AND ?${discardedSearchClause}
+        ORDER BY cra.discarded_at DESC
+        `
+      )
+      .bind(...discardedParams, ...discardedSearchParams)
+      .all();
+    const rsBaseParams: any[] = [startDate, endDate];
+    let rsWhere = "DATE(rs.submission_date) BETWEEN ? AND ?";
+    if (teamIds.length > 0) {
+      rsWhere += ` AND rs.team_id IN (${teamIds.join(",")})`;
+    }
+    let rsEventClause = " AND rs.entry_type IN ('interview','deal')";
+    if (eventType && ["interview", "deal"].includes(eventType)) {
+      rsEventClause = " AND rs.entry_type = ?";
+      rsBaseParams.push(eventType);
+    }
+    let rsSearchClause = "";
+    let rsSearchParams: any[] = [];
+    if (search.length > 0) {
+      rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      rsSearchParams = [like, like, like, like];
+    }
+    const rsRows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(rs.submission_date) as event_date,
+          rs.entry_type as event_type,
+          rs.candidate_name,
+          ar.title as role_title,
+          ar.role_code as role_code,
+          cl.name as client_name,
+          t.name as team_name,
+          rs.submission_type,
+          rs.interview_level,
+          rs.cv_match_percent,
+          rs.notes
+        FROM recruiter_submissions rs
+        INNER JOIN am_roles ar ON rs.role_id = ar.id
+        INNER JOIN clients cl ON ar.client_id = cl.id
+        INNER JOIN app_teams t ON ar.team_id = t.id
+        WHERE ${rsWhere}${rsEventClause}${rsSearchClause}
+        ORDER BY rs.submission_date DESC
+        `
+      )
+      .bind(...rsBaseParams, ...rsSearchParams)
+      .all();
+    const dropoutBaseParams: any[] = [(rmUser as any).id, startDate, endDate];
+    let dropoutSearchClause = "";
+    let dropoutSearchParams: any[] = [];
+    if (search.length > 0) {
+      dropoutSearchClause = " AND (ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      const like = `%${search}%`;
+      dropoutSearchParams = [like, like, like];
+    }
+    const dropoutRows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(COALESCE(dr.rm_acknowledged_at, dr.created_at)) as event_date,
+          'dropout' as event_type,
+          NULL as candidate_name,
+          ar.title as role_title,
+          ar.role_code as role_code,
+          cl.name as client_name,
+          t.name as team_name,
+          NULL as submission_type,
+          NULL as interview_level,
+          NULL as cv_match_percent,
+          dr.dropout_reason as notes
+        FROM dropout_requests dr
+        INNER JOIN am_roles ar ON dr.role_id = ar.id
+        INNER JOIN clients cl ON ar.client_id = cl.id
+        INNER JOIN app_teams t ON ar.team_id = t.id
+        WHERE dr.rm_user_id = ? AND DATE(COALESCE(dr.rm_acknowledged_at, dr.created_at)) BETWEEN ? AND ?${dropoutSearchClause}
+        ORDER BY COALESCE(dr.rm_acknowledged_at, dr.created_at) DESC
+        `
+      )
+      .bind(...dropoutBaseParams, ...dropoutSearchParams)
+      .all();
+    let allEvents = [
+      ...(rsRows.results || []),
+      ...(craRows.results || []),
+      ...(discardedRows.results || []),
+      ...(dropoutRows.results || [])
+    ].map((r: any) => ({
+      event_date: (r as any).event_date,
+      event_type: (r as any).event_type,
+      candidate_name: (r as any).candidate_name || "",
+      role_title: (r as any).role_title || "",
+      role_code: (r as any).role_code || "",
+      client_name: (r as any).client_name || "",
+      team_name: (r as any).team_name || "",
+      submission_type: (r as any).submission_type || "",
+      interview_level: (r as any).interview_level != null ? String((r as any).interview_level) : "",
+      cv_match_percent: (r as any).cv_match_percent != null ? String((r as any).cv_match_percent) : "",
+      notes: (r as any).notes || ""
+    }));
+    if (eventType) {
+      allEvents = allEvents.filter((e) => e.event_type === eventType);
+    }
+    if (statusFilter === "in_play") {
+      allEvents = allEvents.filter((e) => e.event_type === "rm_evaluation" || e.event_type === "submitted" || e.event_type === "interview");
+    } else if (statusFilter === "positive") {
+      allEvents = allEvents.filter((e) => e.event_type === "client_submitted" || e.event_type === "deal" || e.event_type === "interview");
+    } else if (statusFilter === "negative") {
+      allEvents = allEvents.filter((e) => e.event_type === "client_rejected" || e.event_type === "discarded" || e.event_type === "dropout");
+    }
+    allEvents.sort((a, b) => {
+      const av = (a as any)[sortBy] || "";
+      const bv = (b as any)[sortBy] || "";
+      if (sortBy === "event_date") {
+        const at = new Date(av).getTime();
+        const bt = new Date(bv).getTime();
+        return sortDesc ? bt - at : at - bt;
+      }
+      const cmp = String(av).localeCompare(String(bv));
+      return sortDesc ? -cmp : cmp;
+    });
+    const total = allEvents.length;
+    const start = (page - 1) * pageSize;
+    const paged = allEvents.slice(start, start + pageSize);
+    return c.json({ events: paged, total });
+  } catch (error: any) {
+    console.error("RM Ledger read failed:", error);
+    return c.json({ error: "Failed to read RM ledger" }, 500);
+  }
+});
+
 export default app;

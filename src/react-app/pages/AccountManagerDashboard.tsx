@@ -11,6 +11,7 @@ import DropoutDecisions from "@/react-app/components/account-manager/DropoutDeci
 import ClientTeamSelector from "@/react-app/components/account-manager/ClientTeamSelector";
 import Pipeline from "@/react-app/components/account-manager/Pipeline";
 import AMSubmissions from "@/react-app/components/account-manager/AMSubmissions";
+import AMLedger from "@/react-app/pages/AMLedger";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
 interface Client {
@@ -158,6 +159,7 @@ export default function AccountManagerDashboard() {
             />
             <Route path="/analytics" element={<AMAnalytics />} />
             <Route path="/submissions" element={<AMSubmissions />} />
+            <Route path="/ledger" element={<AMLedger />} />
             <Route path="/dropouts" element={<DropoutDecisions />} />
             <Route path="/company" element={<CompanyPage />} />
             <Route path="/profile" element={<Profile />} />
