@@ -1671,4 +1671,122 @@ app.put("/api/admin/profile-settings", adminOnly, async (c) => {
   }
 });
 
+app.post("/api/admin/master-reset", adminOnly, async (c) => {
+  const db = c.env.DB;
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const email = body?.email || "dhasan111@gmail.com";
+  const password = body?.password || "test123";
+  const name = body?.name || "Admin";
+  try {
+    const tables = [
+      "candidate_role_associations",
+      "recruiter_submissions",
+      "am_role_interviews",
+      "role_recruiter_assignments",
+      "am_role_teams",
+      "role_status_pending",
+      "dropout_requests",
+      "recruiter_team_assignments",
+      "recruiter_client_assignments",
+      "team_assignments",
+      "client_assignments",
+      "notifications",
+      "am_monthly_reminders",
+      "am_roles",
+      "candidates",
+      "clients",
+      "app_teams",
+      "app_settings",
+      "code_counters",
+      "users"
+    ];
+    for (const t of tables) {
+      const exists = await db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .bind(t)
+        .first();
+      if (exists) {
+        await db.prepare(`DELETE FROM ${t}`).run();
+      }
+    }
+    const res = await db
+      .prepare(`
+        INSERT INTO users (mocha_user_id, email, name, user_code, role, password, is_active, created_at, updated_at)
+        VALUES ('admin-001', ?, ?, 'ADM-001', 'admin', ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `)
+      .bind(email, name, password)
+      .run();
+    return c.json({ success: true, admin_user_id: res.meta.last_row_id, email });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to perform master reset" }, 500);
+  }
+});
+
+app.post("/api/system/master-reset", async (c) => {
+  const db = c.env.DB;
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const email = body?.email || "dhasan111@gmail.com";
+  const password = body?.password || "test123";
+  const name = body?.name || "Admin";
+  try {
+    const tables = [
+      "candidate_role_associations",
+      "recruiter_submissions",
+      "am_role_interviews",
+      "role_recruiter_assignments",
+      "am_role_teams",
+      "role_status_pending",
+      "dropout_requests",
+      "recruiter_team_assignments",
+      "recruiter_client_assignments",
+      "team_assignments",
+      "client_assignments",
+      "notifications",
+      "am_monthly_reminders",
+      "am_roles",
+      "candidates",
+      "clients",
+      "app_teams",
+      "app_settings",
+      "code_counters",
+      "users"
+    ];
+    for (const t of tables) {
+      const exists = await db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .bind(t)
+        .first();
+      if (exists) {
+        await db.prepare(`DELETE FROM ${t}`).run();
+      }
+    }
+    const res = await db
+      .prepare(`
+        INSERT INTO users (mocha_user_id, email, name, user_code, role, password, is_active, created_at, updated_at)
+        VALUES ('admin-001', ?, ?, 'ADM-001', 'admin', ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `)
+      .bind(email, name, password)
+      .run();
+    return c.json({ success: true, admin_user_id: res.meta.last_row_id, email });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to perform master reset" }, 500);
+  }
+});
+
+app.get("/api/system/tables", async (c) => {
+  const db = c.env.DB;
+  try {
+    const rows = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
+    return c.json(rows.results || []);
+  } catch (error) {
+    return c.json({ error: "Failed to list tables" }, 500);
+  }
+});
+
 export default app;

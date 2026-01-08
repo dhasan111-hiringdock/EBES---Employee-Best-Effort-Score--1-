@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { Building2, Users, RefreshCw, BarChart3, Briefcase, UserCircle, Target, LogOut, TrendingUp, AlertTriangle } from "lucide-react";
+import { Building2, Users, RefreshCw, BarChart3, Briefcase, UserCircle, Target, LogOut, TrendingUp, AlertTriangle, Inbox } from "lucide-react";
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
@@ -86,6 +86,7 @@ export default function AccountManagerLayout({
     { path: "/am", icon: Target, label: "Dashboard" },
     { path: "/am/daily-report", icon: BarChart3, label: "Daily Report" },
     { path: "/am/roles", icon: Briefcase, label: "Roles" },
+    { path: "/am/submissions", icon: Inbox, label: "Submissions" },
     { path: "/am/pipeline", icon: RefreshCw, label: "Pipe" },
     { path: "/am/analytics", icon: BarChart3, label: "Analytics" },
     { path: "/am/dropouts", icon: AlertTriangle, label: "Dropout Decisions" },
@@ -179,7 +180,7 @@ export default function AccountManagerLayout({
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             const isDropoutTab = item.path === "/am/dropouts";
-            const isRolesTab = item.path === "/am/roles";
+            const isSubmissionsTab = item.path === "/am/submissions";
             
             return (
               <Link
@@ -202,7 +203,7 @@ export default function AccountManagerLayout({
                     {pendingDropoutsCount}
                   </span>
                 )}
-                {isRolesTab && pendingSubmissionsCount > 0 && (
+                {isSubmissionsTab && pendingSubmissionsCount > 0 && (
                   <span className="ml-auto px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full min-w-[20px] text-center">
                     {pendingSubmissionsCount}
                   </span>

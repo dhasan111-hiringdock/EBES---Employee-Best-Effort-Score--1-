@@ -10,6 +10,7 @@ import MonthlyReminderModal from "@/react-app/components/account-manager/Monthly
 import DropoutDecisions from "@/react-app/components/account-manager/DropoutDecisions";
 import ClientTeamSelector from "@/react-app/components/account-manager/ClientTeamSelector";
 import Pipeline from "@/react-app/components/account-manager/Pipeline";
+import AMSubmissions from "@/react-app/components/account-manager/AMSubmissions";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
 interface Client {
@@ -156,6 +157,7 @@ export default function AccountManagerDashboard() {
               }
             />
             <Route path="/analytics" element={<AMAnalytics />} />
+            <Route path="/submissions" element={<AMSubmissions />} />
             <Route path="/dropouts" element={<DropoutDecisions />} />
             <Route path="/company" element={<CompanyPage />} />
             <Route path="/profile" element={<Profile />} />

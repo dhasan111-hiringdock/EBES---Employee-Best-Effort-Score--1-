@@ -50,6 +50,43 @@ app.get("/api/am/pending-submissions-count", amOnly, async (c) => {
   }
 });
 
+// Pending submissions list for AM
+app.get("/api/am/pending-submissions", amOnly, async (c) => {
+  const db = c.env.DB;
+  const amUser = c.get("amUser");
+  try {
+    const qLimit = Number(c.req.query("limit") || "100");
+    const limit = Math.max(1, Math.min(qLimit, 500));
+    const rows = await db
+      .prepare(`
+        SELECT 
+          cra.role_id,
+          r.title as role_title,
+          r.role_code,
+          cl.name as client_name,
+          cra.candidate_id,
+          c.name as candidate_name,
+          c.email as candidate_email,
+          c.phone as candidate_phone,
+          cra.submission_date
+        FROM candidate_role_associations cra
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        INNER JOIN clients cl ON cl.id = r.client_id
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        WHERE cra.status = 'submitted' 
+          AND cra.is_discarded = 0
+          AND r.account_manager_id = ?
+        ORDER BY cra.submission_date DESC
+        LIMIT ${limit}
+      `)
+      .bind((amUser as any).id)
+      .all();
+    return c.json(rows.results || []);
+  } catch (error) {
+    return c.json({ error: "Failed to fetch pending submissions" }, 500);
+  }
+});
+
 // Generate role code
 async function generateRoleCode(db: any): Promise<string> {
   const counter = await db

@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { LayoutDashboard, UserCircle, Target, LogOut, Users, BarChart3, TrendingUp, AlertTriangle } from "lucide-react";
+import { LayoutDashboard, UserCircle, Target, LogOut, Users, BarChart3, TrendingUp, AlertTriangle, Inbox } from "lucide-react";
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
@@ -62,6 +62,7 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
     { path: "/rm", icon: LayoutDashboard, label: "Dashboard" },
     { path: "/rm/analytics", icon: BarChart3, label: "Analytics" },
     { path: "/rm/roles", icon: Target, label: "Roles" },
+    { path: "/rm/submissions", icon: Inbox, label: "Submissions" },
     { path: "/rm/pipeline", icon: LayoutDashboard, label: "Pipe" },
     { path: "/rm/team", icon: Users, label: "Team Management" },
     { path: "/rm/dropouts", icon: AlertTriangle, label: "Dropout Requests" },
@@ -106,7 +107,7 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             const isDropoutTab = item.path === "/rm/dropouts";
-            const isRolesTab = item.path === "/rm/roles";
+            const isSubmissionsTab = item.path === "/rm/submissions";
             
             return (
               <Link
@@ -129,7 +130,7 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
                     {pendingDropoutsCount}
                   </span>
                 )}
-                {isRolesTab && pendingSubmissionsCount > 0 && (
+                {isSubmissionsTab && pendingSubmissionsCount > 0 && (
                   <span className="ml-auto px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full min-w-[20px] text-center">
                     {pendingSubmissionsCount}
                   </span>
