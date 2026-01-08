@@ -1,4 +1,4 @@
-import { X, Building2, Users, User, Calendar, Send, TrendingUp, UserX, CheckCircle } from "lucide-react";
+import { X, Building2, Users, User, Calendar, Send, TrendingUp, XCircle, CheckCircle } from "lucide-react";
 
 interface Role {
   id: number;
@@ -154,7 +154,7 @@ export default function RoleDetailsModal({ role, onClose }: RoleDetailsModalProp
               <div className="bg-slate-50 rounded-2xl p-5 border border-red-200">
                 <div className="flex items-center gap-2 mb-3">
                   <div className="bg-red-100 rounded-lg p-2">
-                    <UserX className="w-5 h-5 text-red-600" />
+                    <XCircle className="w-5 h-5 text-red-600" />
                   </div>
                   <label className="text-sm font-semibold text-slate-600">Discarded</label>
                 </div>

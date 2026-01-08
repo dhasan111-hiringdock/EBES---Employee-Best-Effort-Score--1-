@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Briefcase, Calendar, TrendingUp, UserX, FileText } from "lucide-react";
+import { X, Briefcase, Calendar, TrendingUp, XCircle, FileText } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
 interface Role {
@@ -287,7 +287,7 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                         entryType === "dropout" ? "bg-red-100" : "bg-slate-100"
                       }`}>
-                        <UserX className={`w-5 h-5 ${
+                        <XCircle className={`w-5 h-5 ${
                           entryType === "dropout" ? "text-red-600" : "text-slate-400"
                         }`} />
                       </div>
@@ -539,7 +539,7 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <div className="sticky top-0 bg-gradient-to-r from-red-600 to-orange-600 px-6 py-4 flex justify-between items-center rounded-t-2xl">
               <div className="flex items-center gap-2">
-                <UserX className="w-6 h-6 text-white" />
+                <XCircle className="w-6 h-6 text-white" />
                 <h3 className="text-xl font-bold text-white">Select Role with Deal</h3>
               </div>
               <button

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Download } from "lucide-react";
-import { fetchWithAuth, amSubmitCandidateToClient, amClientRejectCandidate, amDiscardCandidate, getAmRoleSubmissions, amMarkDeal } from "@/react-app/utils/api";
+import { fetchWithAuth, amSubmitCandidateToClient, amClientRejectCandidate, amDiscardCandidate, getAmRoleSubmissions, amMarkDeal, amReviewSubmission } from "@/react-app/utils/api";
 import { useLocation } from "react-router";
 
 interface Role {
@@ -50,6 +50,10 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   const [sortKey, setSortKey] = useState<"recent" | "score" | "location" | "contract" | "payment">("recent");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [candidateStatusFilter, setCandidateStatusFilter] = useState<string>("all");
+  const [noteDialog, setNoteDialog] = useState<{ roleId: number; candidateId: number; type: 'discard' | 'client_reject'; submissionId?: number } | null>(null);
+  const [noteText, setNoteText] = useState<string>("");
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const quickReasons = useMemo(() => ["Not a fit", "Client budget", "Timeline mismatch", "Skills mismatch", "Not available"], []);
 
   const formatPayment = (row: RoleSubmission) => {
     if (row.rm_rate_bill == null) return "-";
@@ -178,30 +182,8 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
     URL.revokeObjectURL(url);
   };
 
-  const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await amDiscardCandidate(roleId, candidateId, "Discarded via Pipe");
-    if (res.ok) {
-      const r = await getAmRoleSubmissions(roleId);
-      if (r.ok) {
-        const payload = await r.json();
-        setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
-      }
-    }
-  };
-
   const submitToClient = async (roleId: number, candidateId: number) => {
     const res = await amSubmitCandidateToClient(roleId, candidateId);
-    if (res.ok) {
-      const r = await getAmRoleSubmissions(roleId);
-      if (r.ok) {
-        const payload = await r.json();
-        setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
-      }
-    }
-  };
-
-  const clientReject = async (roleId: number, candidateId: number) => {
-    const res = await amClientRejectCandidate(roleId, candidateId);
     if (res.ok) {
       const r = await getAmRoleSubmissions(roleId);
       if (r.ok) {
@@ -220,6 +202,40 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
         setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
       }
     }
+  };
+
+  const handleConfirmNote = async () => {
+    const dlg = noteDialog;
+    if (!dlg) return;
+    if (!noteText.trim()) {
+      setNoteError("Please add a note");
+      return;
+    }
+    if (dlg.type === 'discard') {
+      const res = await amDiscardCandidate(dlg.roleId, dlg.candidateId, noteText || undefined);
+      if (res.ok) {
+        const r = await getAmRoleSubmissions(dlg.roleId);
+        if (r.ok) {
+          const payload = await r.json();
+          setDataByRole((prev) => ({ ...prev, [dlg.roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
+        }
+      }
+    } else {
+      const res = await amClientRejectCandidate(dlg.roleId, dlg.candidateId);
+      if (res.ok) {
+        if (dlg.submissionId) {
+          await amReviewSubmission(dlg.submissionId, { am_notes: noteText || '' });
+        }
+        const r = await getAmRoleSubmissions(dlg.roleId);
+        if (r.ok) {
+          const payload = await r.json();
+          setDataByRole((prev) => ({ ...prev, [dlg.roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
+        }
+      }
+    }
+    setNoteDialog(null);
+    setNoteText("");
+    setNoteError(null);
   };
 
   return (
@@ -440,7 +456,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
                                     onClick={() => {
                                       setOpenMenuFor(null);
-                                      clientReject(role.id, row.candidate_id!);
+                                      setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'client_reject', submissionId: row.submission_id });
                                     }}
                                   >
                                     Client Rejected
@@ -458,7 +474,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded text-red-600"
                                     onClick={() => {
                                       setOpenMenuFor(null);
-                                      discardCandidate(role.id, row.candidate_id!);
+                                      setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'discard', submissionId: row.submission_id });
                                     }}
                                   >
                                     Discard
@@ -470,7 +486,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                               {row.is_discarded !== 1 ? (
                                 <button
                                   className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
-                                  onClick={() => discardCandidate(role.id, row.candidate_id!)}
+                                  onClick={() => setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'discard', submissionId: row.submission_id })}
                                 >
                                   Discard
                                 </button>
@@ -487,6 +503,38 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
               </div>
             );
           })}
+        </div>
+      )}
+      {noteDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-md p-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">{noteDialog.type === 'discard' ? 'Discard Candidate' : 'Client Rejected'}</h3>
+            <p className="text-sm text-gray-600 mb-3">Add a note</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {quickReasons.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setNoteText((prev) => (prev ? `${prev} ${r}` : r))}
+                  className="px-2 py-1 text-xs rounded-full border border-gray-300 hover:bg-gray-50"
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <textarea
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              rows={4}
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Reason or details"
+            />
+            {noteError && <div className="mt-2 text-xs text-red-600">{noteError}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => { setNoteDialog(null); setNoteText(""); setNoteError(null); }} className="px-3 py-2 text-sm border border-gray-200 rounded-lg">Cancel</button>
+              <button disabled={!noteText.trim()} onClick={handleConfirmNote} className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50">Confirm</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

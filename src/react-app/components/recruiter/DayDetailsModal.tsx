@@ -1,4 +1,4 @@
-import { X, Calendar as CalendarIcon, Briefcase, Clock, TrendingUp, Users, UserX, FileText, Building2 } from "lucide-react";
+import { X, Calendar as CalendarIcon, Briefcase, Clock, TrendingUp, Users, XCircle, FileText, Building2 } from "lucide-react";
 
 interface Submission {
   id: number;
@@ -58,7 +58,7 @@ export default function DayDetailsModal({ date, submissions, onClose, onAddEntry
       case 'submission': return <FileText className="w-5 h-5" />;
       case 'interview': return <Users className="w-5 h-5" />;
       case 'deal': return <TrendingUp className="w-5 h-5" />;
-      case 'dropout': return <UserX className="w-5 h-5" />;
+      case 'dropout': return <XCircle className="w-5 h-5" />;
       default: return <FileText className="w-5 h-5" />;
     }
   };
@@ -132,7 +132,7 @@ export default function DayDetailsModal({ date, submissions, onClose, onAddEntry
             </div>
             <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">
-                <UserX className="w-5 h-5 text-red-600" />
+                <XCircle className="w-5 h-5 text-red-600" />
                 <span className="text-sm font-medium text-red-600">Dropouts</span>
               </div>
               <p className="text-2xl font-bold text-red-700">{dropouts.length}</p>

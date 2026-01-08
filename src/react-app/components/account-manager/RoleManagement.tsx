@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Plus, Briefcase, X, CheckCircle, XCircle, Save } from "lucide-react";
+import { Plus, Briefcase, X, CheckCircle, Save } from "lucide-react";
 import CreateRoleModal from "./CreateRoleModal";
 import EditRoleModal from "./EditRoleModal";
 import DeleteRoleModal from "./DeleteRoleModal";
@@ -49,102 +49,103 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   const [notesEdits, setNotesEdits] = useState<Record<number, string>>({});
 
   const underCons = roleSubmissions.under_consideration || [];
-  const rmEvaluation = underCons.filter((i: any) => (i as any).association_status === 'rm_evaluation');
-  const submittedToAM = underCons.filter((i: any) => (i as any).association_status === 'submitted');
-  const submittedToClient = underCons.filter((i: any) => (i as any).association_status === 'client_submitted');
-  const clientRejected = underCons.filter((i: any) => (i as any).association_status === 'client_rejected');
-  const inPlay = underCons.filter((i: any) => !['rm_evaluation','submitted','client_submitted','client_rejected','deal'].includes((i as any).association_status));
+  
 
-  const renderSubmissionItem = (item: any) => (
-    <div key={item.association_id} className="border border-gray-200 rounded-xl p-4">
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-        <div className="md:col-span-9">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-gray-900">{item.candidate_name}</span>
-            <span className="text-xs text-gray-500 font-mono">{item.candidate_code || item.candidate_id}</span>
-            {(() => {
-              const s = (item as any).association_status;
-              if (s === 'submitted') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Submitted to AM</span>;
-              if (s === 'client_submitted') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>;
-              if (s === 'client_rejected') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>;
-              if (s === 'rm_evaluation') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Pending Evaluation</span>;
-              return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>;
-            })()}
-          </div>
-          <div className="text-xs text-gray-600 mt-1">{item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}</div>
-          <div className="text-xs text-gray-500 mt-1">Submitted on {new Date(item.submission_date).toLocaleDateString()}</div>
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-xs text-gray-600">Location</p>
-              <p className="text-sm font-medium text-gray-900">{item.rm_location || '-'}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-xs text-gray-600">Contract Type</p>
-              <p className="text-sm font-medium text-gray-900">{item.rm_work_type || '-'}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-xs text-gray-600">RM Validation</p>
-              <p className="text-sm font-medium text-gray-900">{item.rm_validation_status || '-'}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-xs text-gray-600">Rates</p>
-              <p className="text-sm font-medium text-gray-900">{item.rm_rate_bill ? `Bill: ${item.rm_rate_bill}` : '-'}{item.rm_rate_pay ? ` · Pay: ${item.rm_rate_pay}` : ''}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-xs text-gray-600">Score</p>
-              <p className="text-sm font-medium text-gray-900">{item.score != null ? Number(item.score).toFixed(2) : '-'}</p>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="text-xs text-gray-600">Current Status</p>
-              <p className="text-sm font-medium text-gray-900">
-                {(() => {
-                  const s = item.association_status || 'submitted';
-                  if (s === 'rm_evaluation') return 'Pending Evaluation';
-                  if (s === 'submitted') return 'Submitted to AM';
-                  if (s === 'client_submitted') return 'Submitted to Client';
-                  if (s === 'client_rejected') return 'Client Rejected';
-                  if (s === 'deal') return 'Deal';
-                  return 'In Play';
-                })()}
-              </p>
-            </div>
-          </div>
-          {item.candidate_resume_url && (
-            <div className="mt-2"><a href={item.candidate_resume_url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:text-indigo-800">View CV</a></div>
-          )}
-          <textarea
-            placeholder="Add notes"
-            defaultValue={item.am_notes || ''}
-            onChange={(e) => setNotesEdits(prev => ({ ...prev, [(item.submission_id || 0)]: e.target.value }))}
-            className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-            rows={2}
-            disabled={!item.submission_id}
-          />
-          <div className="mt-3 text-xs text-gray-500">Recruiter: {item.recruiter_name} ({item.recruiter_code})</div>
+  const renderSubmissionRow = (item: any) => (
+    <tr key={item.association_id} className="border-b border-gray-200 hover:bg-gray-50">
+      <td className="py-2 px-3">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-gray-900">{item.candidate_name}</span>
+          <span className="text-xs text-gray-500 font-mono">{item.candidate_code || item.candidate_id}</span>
+          {(() => {
+            const s = (item as any).association_status;
+            if (s === 'submitted') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Submitted to AM</span>;
+            if (s === 'client_submitted') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>;
+            if (s === 'client_rejected') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>;
+            if (s === 'rm_evaluation') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Pending Evaluation</span>;
+            if (s === 'deal') return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-green-100 text-green-800 border border-green-200">Deal</span>;
+            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>;
+          })()}
         </div>
-        <div className="md:col-span-3 flex md:flex-col gap-2 justify-end">
+        <div className="text-xs text-gray-600 mt-1">{item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}</div>
+        <div className="text-xs text-gray-500 mt-1">Submitted on {item.submission_date ? new Date(item.submission_date).toLocaleDateString() : 'N/A'}</div>
+      </td>
+      <td className="py-2 px-3 text-sm">{item.rm_location || '-'}</td>
+      <td className="py-2 px-3 text-sm">{item.rm_work_type || '-'}</td>
+      <td className="py-2 px-3 text-sm">{item.rm_validation_status || '-'}</td>
+      <td className="py-2 px-3 text-sm">{item.rm_rate_bill ? `Bill: ${item.rm_rate_bill}` : '-'}{item.rm_rate_pay ? ` · Pay: ${item.rm_rate_pay}` : ''}</td>
+      <td className="py-2 px-3 text-sm">{item.score != null ? Number(item.score).toFixed(2) : '-'}</td>
+      <td className="py-2 px-3 text-sm">
+        {item.candidate_resume_url && (
+          <a href={item.candidate_resume_url} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:text-indigo-800">View CV</a>
+        )}
+      </td>
+      <td className="py-2 px-3">
+        <textarea
+          placeholder="Add notes"
+          defaultValue={item.am_notes || ''}
+          onChange={(e) => setNotesEdits(prev => ({ ...prev, [(item.submission_id || 0)]: e.target.value }))}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+          rows={2}
+          disabled={!item.submission_id}
+        />
+      </td>
+      <td className="py-2 px-3">
+        <div className="flex items-center gap-2">
           {item.association_status === 'deal' ? (
             <span className="px-3 py-2 text-xs text-green-700 border border-green-200 rounded-lg bg-green-50 justify-center flex items-center gap-1">
               <CheckCircle className="w-4 h-4" />
               Deal
             </span>
           ) : (
-            <div className="flex items-center gap-2">
-              <select defaultValue="" onChange={(e) => { const v = e.target.value; if (!v || !submissionsRole) return; const roleId = submissionsRole.id; if (item.association_status === 'client_submitted') { if (v === 'client_reject') clientReject(roleId, item.candidate_id); else if (v === 'pull_out') pullOut(roleId, item.candidate_id); else if (v === 'deal') markDeal(roleId, item.candidate_id); } else { if (v === 'submit_to_client') submitToClient(roleId, item.candidate_id); else if (v === 'reject') discardCandidate(roleId, item.candidate_id); } e.currentTarget.value = ''; }} className="px-3 py-2 text-sm border border-gray-300 rounded-lg">
-                <option value="" disabled>Choose Action</option>
-                {item.association_status === 'client_submitted' ? (<><option value="client_reject">Client Rejected</option><option value="pull_out">Pull Out</option><option value="deal">Deal</option></>) : (<><option value="submit_to_client">Submit to Client</option><option value="reject">Discard</option></>)}
-              </select>
-            </div>
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v || !submissionsRole) return;
+                const roleId = submissionsRole.id;
+                if (item.association_status === 'client_submitted') {
+                  if (v === 'client_reject') clientReject(roleId, item.candidate_id);
+                  else if (v === 'pull_out') pullOut(roleId, item.candidate_id);
+                  else if (v === 'deal') markDeal(roleId, item.candidate_id);
+                } else {
+                  if (v === 'submit_to_client') submitToClient(roleId, item.candidate_id);
+                  else if (v === 'reject') discardCandidate(roleId, item.candidate_id);
+                }
+                e.currentTarget.value = '';
+              }}
+              className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
+            >
+              <option value="" disabled>Choose Action</option>
+              {item.association_status === 'client_submitted' ? (
+                <>
+                  <option value="client_reject">Client Rejected</option>
+                  <option value="pull_out">Pull Out</option>
+                  <option value="deal">Deal</option>
+                </>
+              ) : (
+                <>
+                  <option value="submit_to_client">Submit to Client</option>
+                  <option value="reject">Discard</option>
+                </>
+              )}
+            </select>
           )}
-          <button onClick={() => saveNotes(item.submission_id)} disabled={!item.submission_id} className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50 justify-center">
-            <Save className="w-4 h-4" />
-            Save Notes
-          </button>
         </div>
-      </div>
-    </div>
+      </td>
+      <td className="py-2 px-3 text-right">
+        <button
+          onClick={() => saveNotes(item.submission_id)}
+          disabled={!item.submission_id}
+          className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50 justify-center ml-auto"
+        >
+          <Save className="w-4 h-4" />
+          Save
+        </button>
+      </td>
+    </tr>
   );
-  
+
   
 
   useEffect(() => {
@@ -569,113 +570,30 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
                   <p className="text-gray-600">No submissions yet</p>
                 </div>
               ) : (
-                <div className="space-y-8">
-                  {rmEvaluation.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <CheckCircle className="w-4 h-4 text-yellow-600" />
-                        <span className="text-sm font-semibold text-gray-700">Pending Evaluation</span>
-                      </div>
-                      <div className="space-y-3">
-                        {rmEvaluation.map((item: any) => renderSubmissionItem(item))}
-                      </div>
-                    </div>
-                  )}
-
-                  {submittedToAM.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <CheckCircle className="w-4 h-4 text-indigo-600" />
-                        <span className="text-sm font-semibold text-gray-700">Submitted to AM</span>
-                      </div>
-                      <div className="space-y-3">
-                        {submittedToAM.map((item: any) => renderSubmissionItem(item))}
-                      </div>
-                    </div>
-                  )}
-
-                  {submittedToClient.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <CheckCircle className="w-4 h-4 text-blue-600" />
-                        <span className="text-sm font-semibold text-gray-700">Submitted to Client</span>
-                      </div>
-                      <div className="space-y-3">
-                        {submittedToClient.map((item: any) => renderSubmissionItem(item))}
-                      </div>
-                    </div>
-                  )}
-
-                  {clientRejected.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <XCircle className="w-4 h-4 text-red-600" />
-                        <span className="text-sm font-semibold text-gray-700">Client Rejected</span>
-                      </div>
-                      <div className="space-y-3">
-                        {clientRejected.map((item: any) => renderSubmissionItem(item))}
-                      </div>
-                    </div>
-                  )}
-
-                  {inPlay.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <CheckCircle className="w-4 h-4 text-emerald-600" />
-                        <span className="text-sm font-semibold text-gray-700">In Play</span>
-                      </div>
-                      <div className="space-y-3">
-                        {inPlay.map((item: any) => renderSubmissionItem(item))}
-                      </div>
-                    </div>
-                  )}
- 
-                  {roleSubmissions.rejected.length > 0 && (
-                    <div>
-                      <div className="flex items-center gap-2 mb-3">
-                        <XCircle className="w-4 h-4 text-red-600" />
-                        <span className="text-sm font-semibold text-gray-700">Rejected</span>
-                      </div>
-                      <div className="space-y-3">
-                        {roleSubmissions.rejected.map((item: any) => (
-                          <div key={item.association_id} className="border border-gray-200 rounded-xl p-4 bg-red-50/40">
-                            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                              <div className="md:col-span-9">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-gray-900">{item.candidate_name}</span>
-                                  <span className="text-xs text-gray-500 font-mono">{item.candidate_code || item.candidate_id}</span>
-                                </div>
-                                <div className="text-xs text-gray-600 mt-1">
-                                  {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
-                                </div>
-                                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                  <div className="bg-white border border-red-200 rounded-lg p-3">
-                                    <p className="text-xs text-red-700">Discarded On</p>
-                                    <p className="text-sm font-medium text-red-700">{item.discarded_at ? new Date(item.discarded_at).toLocaleDateString() : 'N/A'}</p>
-                                  </div>
-                                  <div className="bg-white border border-red-200 rounded-lg p-3">
-                                    <p className="text-xs text-red-700">Reason</p>
-                                    <p className="text-sm font-medium text-red-700">{item.discarded_reason || 'N/A'}</p>
-                                  </div>
-                                  <div className="bg-white border border-red-200 rounded-lg p-3">
-                                    <p className="text-xs text-red-700">RM Validation</p>
-                                    <p className="text-sm font-medium text-red-700">{item.rm_validation_status || '-'}</p>
-                                  </div>
-                                </div>
-                                <div className="mt-3 text-xs text-gray-500">
-                                  Recruiter: {item.recruiter_name} ({item.recruiter_code})
-                                </div>
-                              </div>
-                              <div className="md:col-span-3 flex md:flex-col gap-2 justify-end">
-                                <span className="px-3 py-2 text-xs text-gray-600">Discarded</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Candidate</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Location</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Contract Type</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Rates</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Score (0–5)</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Status</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Submitted</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">CV</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Notes</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Action</th>
+                        <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Save</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...underCons, ...roleSubmissions.rejected].map((item: any) => renderSubmissionRow(item))}
+                    </tbody>
+                  </table>
                 </div>
+                </>
               )}
             </div>
           </div>

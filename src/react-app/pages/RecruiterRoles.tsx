@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Briefcase, Search, CheckCircle, XCircle, Users, TrendingUp, UserX, Send, Download, Bell, Clock } from "lucide-react";
+import { Briefcase, Search, CheckCircle, XCircle, Users, TrendingUp, Send, Download, Bell, Clock } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 import RoleDetailsModal from "@/react-app/components/recruiter/RoleDetailsModal";
 
@@ -640,7 +640,7 @@ export default function RecruiterRoles() {
                           </div>
                           <div className="bg-white rounded-lg p-3 border border-red-100">
                             <div className="flex items-center gap-2 mb-1">
-                              <UserX className="w-4 h-4 text-red-600" />
+                              <XCircle className="w-4 h-4 text-red-600" />
                               <span className="text-xs text-slate-600 font-medium">Discarded</span>
                             </div>
                             <p className="text-lg font-bold text-red-600">{role.discarded_candidates || 0}</p>

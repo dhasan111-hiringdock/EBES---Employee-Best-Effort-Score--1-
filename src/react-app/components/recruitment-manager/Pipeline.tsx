@@ -43,6 +43,10 @@ export default function Pipeline() {
   const [sortKey, setSortKey] = useState<"recent" | "score" | "location" | "contract" | "payment">("recent");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [candidateStatusFilter, setCandidateStatusFilter] = useState<string>("all");
+  const [noteDialog, setNoteDialog] = useState<{ roleId: number; candidateId: number; submissionId?: number } | null>(null);
+  const [noteText, setNoteText] = useState<string>("");
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const quickReasons = useMemo(() => ["Not a fit", "Lack of required skills", "Better candidate found", "Recruiter error", "Client request"], []);
 
   const formatPayment = (row: RoleSubmission) => {
     if (row.rm_rate_bill == null) return "-";
@@ -164,7 +168,11 @@ export default function Pipeline() {
   };
 
   const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await rmDiscardCandidate(roleId, candidateId, "Discarded via Pipe");
+    if (!noteText.trim()) {
+      setNoteError("Please add a note");
+      return;
+    }
+    const res = await rmDiscardCandidate(roleId, candidateId, noteText || undefined);
     if (res.ok) {
       const r = await getRmRoleSubmissions(roleId);
       if (r.ok) {
@@ -179,6 +187,9 @@ export default function Pipeline() {
         }));
       }
     }
+    setNoteDialog(null);
+    setNoteText("");
+    setNoteError(null);
   };
 
 
@@ -367,65 +378,89 @@ export default function Pipeline() {
                 </div>
 
                 {bucket.pending_evaluation.length > 0 && (
-                  <div className="p-4">
+                  <div className="p-4 overflow-x-auto">
                     <div className="flex items-center gap-2 mb-3">
                       <CheckCircle className="w-4 h-4 text-indigo-600" />
                       <span className="text-sm font-semibold text-gray-700">Pending Evaluation</span>
                     </div>
-                    <div className="space-y-3">
-                      {bucket.pending_evaluation.map((row) => (
-                        <div id={`assoc-${row.association_id}`} key={row.association_id} className="border border-gray-200 rounded-xl p-4">
-                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                            <div className="md:col-span-9">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Candidate</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Validation</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Payment</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Review Date</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Location</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Contract Type</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Score (0–5)</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Notes</th>
+                          <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bucket.pending_evaluation.map((row) => (
+                          <tr id={`assoc-${row.association_id}`} key={row.association_id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-2 px-3">
                               <div className="font-medium text-gray-900">{row.candidate_name || "Unknown"}</div>
                               <div className="text-xs text-gray-500">{row.recruiter_name} · {row.recruiter_code}</div>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+                            </td>
+                            <td className="py-2 px-3">
+                              <input
+                                type="text"
+                                placeholder="Validation status"
+                                defaultValue={row.rm_validation_status || ''}
+                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_validation_status: e.target.value } }))}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
+                                disabled={!row.submission_id}
+                              />
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
                                 <input
-                                  type="text"
-                                  placeholder="Validation status"
-                                  defaultValue={row.rm_validation_status || ''}
-                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_validation_status: e.target.value } }))}
-                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                  type="number"
+                                  placeholder="Payment"
+                                  defaultValue={row.rm_rate_bill !== undefined ? Number(row.rm_rate_bill) : undefined}
+                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_payment: Number(e.target.value) } }))}
+                                  className="pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
                                   disabled={!row.submission_id}
                                 />
-                                <div className="relative">
-                                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
-                                  <input
-                                    type="number"
-                                    placeholder="Payment"
-                                    defaultValue={row.rm_rate_bill !== undefined ? Number(row.rm_rate_bill) : undefined}
-                                    onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_payment: Number(e.target.value) } }))}
-                                    className="pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                                    disabled={!row.submission_id}
-                                  />
-                                  {(() => {
-                                    const wt = (rmEdits[row.submission_id || 0]?.rm_work_type || row.rm_work_type || '').toLowerCase();
-                                    const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
-                                    return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{unit}</span> : null;
-                                  })()}
-                                </div>
+                                {(() => {
+                                  const wt = (rmEdits[row.submission_id || 0]?.rm_work_type || row.rm_work_type || '').toLowerCase();
+                                  const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
+                                  return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{unit}</span> : null;
+                                })()}
+                              </div>
+                            </td>
+                            <td className="py-2 px-3">
                               <input
                                 type="date"
                                 defaultValue={new Date().toISOString().split('T')[0]}
                                 onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_review_date: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
                               />
+                            </td>
+                            <td className="py-2 px-3">
                               <input
                                 type="text"
                                 placeholder="Location"
                                 defaultValue={row.rm_location || ''}
                                 onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_location: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
                               />
+                            </td>
+                            <td className="py-2 px-3">
                               <select
                                 defaultValue={row.rm_work_type || ''}
                                 onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_work_type: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
                               >
                                 <option value="">Contract Type</option>
                                 <option value="SOW">SOW</option>
                                 <option value="Payroll">Payroll</option>
                               </select>
+                            </td>
+                            <td className="py-2 px-3">
                               <input
                                 type="number"
                                 step="0.01"
@@ -434,41 +469,44 @@ export default function Pipeline() {
                                 placeholder="Validation score (0–5)"
                                 defaultValue={row.score != null ? Number(row.score) : undefined}
                                 onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_score_0_5: Number(e.target.value) } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
                               />
-                              </div>
+                            </td>
+                            <td className="py-2 px-3">
                               <textarea
                                 placeholder="Notes"
                                 defaultValue={(rmEdits[(row.submission_id || row.association_id)!] as any)?.rm_notes || ''}
                                 onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_notes: e.target.value } }))}
-                                className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                                 rows={2}
                               />
-                            </div>
-                            <div className="md:col-span-3 flex md:flex-col gap-2 justify-end">
-                              <button
-                                onClick={() => saveRmReview(row.submission_id, role.id, row.candidate_id!, row.association_id)}
-                                className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                              >
-                                Save
-                              </button>
-                              <button
-                                onClick={() => sendToAM(role.id, row.candidate_id!, row.submission_id, row.association_id)}
-                                className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                              >
-                                Send to AM
-                              </button>
-                              <button
-                                onClick={() => discardCandidate(role.id, row.candidate_id!)}
-                                className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                              >
-                                Discard
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => saveRmReview(row.submission_id, role.id, row.candidate_id!, row.association_id)}
+                                  className="px-3 py-2 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => sendToAM(role.id, row.candidate_id!, row.submission_id, row.association_id)}
+                                  className="px-3 py-2 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                                >
+                                  Send to AM
+                                </button>
+                                <button
+                                  onClick={() => setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, submissionId: row.submission_id })}
+                                  className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                                >
+                                  Discard
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
                 <div className="p-4 overflow-x-auto max-h-[420px] overflow-y-auto relative">
@@ -556,7 +594,7 @@ export default function Pipeline() {
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded text-red-600"
                                     onClick={() => {
                                       setOpenMenuFor(null);
-                                      discardCandidate(role.id, row.candidate_id!);
+                                      setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, submissionId: row.submission_id });
                                     }}
                                   >
                                     Discard
@@ -577,7 +615,7 @@ export default function Pipeline() {
                                   )}
                                   <button
                                     className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
-                                    onClick={() => discardCandidate(role.id, row.candidate_id!)}
+                                    onClick={() => setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, submissionId: row.submission_id })}
                                   >
                                     Discard
                                   </button>
@@ -595,6 +633,41 @@ export default function Pipeline() {
               </div>
             );
           })}
+        </div>
+      )}
+      {noteDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-md p-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Discard Candidate</h3>
+            <p className="text-sm text-gray-600 mb-3">Add a note</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {quickReasons.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setNoteText((prev) => (prev ? `${prev} ${r}` : r))}
+                  className="px-2 py-1 text-xs rounded-full border border-gray-300 hover:bg-gray-50"
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            <textarea
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              rows={4}
+              value={noteText}
+              onChange={(e) => {
+                setNoteText(e.target.value);
+                setNoteError(null);
+              }}
+              placeholder="Reason or details"
+            />
+            {noteError && <div className="mt-2 text-xs text-red-600">{noteError}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => { setNoteDialog(null); setNoteText(""); setNoteError(null); }} className="px-3 py-2 text-sm border border-gray-200 rounded-lg">Cancel</button>
+              <button disabled={!noteText.trim()} onClick={() => noteDialog && discardCandidate(noteDialog.roleId, noteDialog.candidateId)} className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50">Confirm</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

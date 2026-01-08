@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Users, Search, UserCheck, UserX, Eye, Trash2, RotateCcw, Briefcase, Edit, Download, Copy, ExternalLink, XCircle } from "lucide-react";
+import { Users, Search, UserCheck, Eye, Trash2, RotateCcw, Briefcase, Edit, Download, Copy, ExternalLink, XCircle } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 import EditCandidateModal from "@/react-app/components/recruiter/EditCandidateModal";
 
@@ -319,7 +319,7 @@ export default function RecruiterCandidates() {
           }`}
         >
           <div className="flex items-center gap-2">
-            <UserX className="w-4 h-4" />
+            <XCircle className="w-4 h-4" />
             Inactive Candidates
           </div>
         </button>
