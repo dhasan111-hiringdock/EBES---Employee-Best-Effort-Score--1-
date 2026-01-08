@@ -158,7 +158,13 @@ app.get("/api/am/roles", amOnly, async (c) => {
 
   try {
     let query = `
-      SELECT r.*, c.name as client_name, t.name as team_name
+      SELECT 
+        r.*,
+        c.name as client_name,
+        t.name as team_name,
+        (SELECT SUM(CASE WHEN cra.status = 'submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
+         FROM candidate_role_associations cra
+         WHERE cra.role_id = r.id) as pending_submissions
       FROM am_roles r
       INNER JOIN clients c ON r.client_id = c.id
       INNER JOIN app_teams t ON r.team_id = t.id
@@ -190,7 +196,7 @@ app.get("/api/am/roles", amOnly, async (c) => {
       }
     }
 
-    query += " ORDER BY r.created_at DESC";
+    query += " ORDER BY pending_submissions DESC, r.created_at DESC";
 
     const roles = await db.prepare(query).bind(...params).all();
 

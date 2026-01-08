@@ -14,6 +14,7 @@ export default function RecruitmentManagerDashboard() {
     <RecruitmentManagerLayout>
       <Routes>
         <Route path="/" element={<RMDashboard />} />
+        <Route path="/daily-report" element={<RMDashboard />} />
         <Route path="/analytics" element={<RMAnalytics />} />
         <Route path="/roles" element={<RMRoles />} />
         <Route path="/pipeline" element={<Pipeline />} />

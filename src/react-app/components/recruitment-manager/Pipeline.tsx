@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import { useLocation } from "react-router";
 
 interface Role {
   id: number;
@@ -106,6 +107,16 @@ export default function Pipeline() {
     }
     return { submittedToClient, clientRejected, discarded };
   }, [dataByRole]);
+  const location = useLocation();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const assoc = params.get('association_id');
+    if (!assoc) return;
+    const el = document.getElementById(`assoc-${assoc}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [location.search, dataByRole, roles]);
   const exportRoleRows = (roleId: number, roleCode: string) => {
     const bucket = dataByRole[roleId] || { pending_evaluation: [], under_consideration: [], rejected: [] };
     const rows = [...(bucket.under_consideration || []), ...(bucket.rejected || [])];
@@ -173,58 +184,6 @@ export default function Pipeline() {
     }
   };
 
-  const submitToClient = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/submit-to-client`, {
-      method: "POST",
-    });
-    if (res.ok) {
-      const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
-      if (r.ok) {
-        const payload = await r.json();
-        setDataByRole((prev) => ({
-          ...prev,
-          [roleId]: {
-            pending_evaluation: payload.pending_evaluation || [],
-            under_consideration: payload.under_consideration || [],
-            rejected: payload.rejected || []
-          }
-        }));
-      }
-    }
-  };
-
-  const clientReject = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/client-reject`, {
-      method: "POST",
-    });
-    if (res.ok) {
-      const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
-      if (r.ok) {
-        const payload = await r.json();
-        setDataByRole((prev) => ({
-          ...prev,
-          [roleId]: {
-            pending_evaluation: payload.pending_evaluation || [],
-            under_consideration: payload.under_consideration || [],
-            rejected: payload.rejected || []
-          }
-        }));
-      }
-    }
-  };
-
-  const markDeal = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/deal`, {
-      method: "POST",
-    });
-    if (res.ok) {
-      const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
-      if (r.ok) {
-        const payload = await r.json();
-        setDataByRole((prev) => ({ ...prev, [roleId]: { pending_evaluation: payload.pending_evaluation || [], under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
-      }
-    }
-  };
 
   const saveRmReview = async (submissionId?: number, roleId?: number, candidateId?: number, associationId?: number) => {
     const key = submissionId ?? associationId;
@@ -426,7 +385,7 @@ export default function Pipeline() {
                     </div>
                     <div className="space-y-3">
                       {bucket.pending_evaluation.map((row) => (
-                        <div key={row.association_id} className="border border-gray-200 rounded-xl p-4">
+                        <div id={`assoc-${row.association_id}`} key={row.association_id} className="border border-gray-200 rounded-xl p-4">
                           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                             <div className="md:col-span-9">
                               <div className="font-medium text-gray-900">{row.candidate_name || "Unknown"}</div>
@@ -579,7 +538,7 @@ export default function Pipeline() {
                           return sortOrder === "desc" ? db - da : da - db;
                         });
                         return sorted.map((row) => (
-                          <tr key={row.association_id || `${row.candidate_id}-${row.submission_id || 0}`} className="border-b border-gray-100 hover:bg-gray-50">
+                          <tr id={`assoc-${row.association_id}`} key={row.association_id || `${row.candidate_id}-${row.submission_id || 0}`} className="border-b border-gray-100 hover:bg-gray-50">
                             <td className="py-2 px-3">
                               <div className="font-medium text-gray-900">{row.candidate_name || "Unknown"}</div>
                               <div className="text-xs text-gray-500">
@@ -604,33 +563,6 @@ export default function Pipeline() {
                               </button>
                               {openMenuFor === `${role.id}:${row.candidate_id}` && (
                                 <div className="absolute z-10 mt-2 bg-white border border-gray-200 rounded shadow-lg p-2 w-48">
-                                  <button
-                                    className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                    onClick={() => {
-                                      setOpenMenuFor(null);
-                                      submitToClient(role.id, row.candidate_id!);
-                                    }}
-                                  >
-                                    Submitted to Client
-                                  </button>
-                                  <button
-                                    className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                    onClick={() => {
-                                      setOpenMenuFor(null);
-                                      clientReject(role.id, row.candidate_id!);
-                                    }}
-                                  >
-                                    Client Rejected
-                                  </button>
-                                  <button
-                                    className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                    onClick={() => {
-                                      setOpenMenuFor(null);
-                                      markDeal(role.id, row.candidate_id!);
-                                    }}
-                                  >
-                                    Deal
-                                  </button>
                                   <button
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded text-red-600"
                                     onClick={() => {

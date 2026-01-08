@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router';
+import { useAuth } from '@/react-app/hooks/useAuth';
 import { Bell, Check, Trash2, X } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
 
@@ -177,6 +179,17 @@ export default function NotificationBell() {
     }
   };
 
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const navigateToCandidate = (notification: Notification) => {
+    if (!notification.related_entity_id) return;
+    const associationId = notification.related_entity_id;
+    const roleRoute = user?.role === 'account_manager' ? '/am/pipeline' : user?.role === 'recruitment_manager' ? '/rm/pipeline' : '';
+    if (!roleRoute) return;
+    setShowDropdown(false);
+    navigate(`${roleRoute}?association_id=${associationId}`);
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -271,8 +284,15 @@ export default function NotificationBell() {
                     {formatTime(notification.created_at)}
                   </span>
                   <div className="flex items-center gap-2">
-                    {notification.related_entity_type === 'candidate_role_association' && notification.type === 'system' && (
+                    {notification.related_entity_type === 'candidate_role_association' && (user?.role === 'recruitment_manager' || user?.role === 'account_manager') && (
                       <>
+                        <button
+                          onClick={() => navigateToCandidate(notification)}
+                          className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                          title="Review"
+                        >
+                          Review
+                        </button>
                         <select
                           value={snoozeSelection[notification.id] ?? 7}
                           onChange={(e) => setSnoozeSelection(prev => ({ ...prev, [notification.id]: parseInt(e.target.value) }))}

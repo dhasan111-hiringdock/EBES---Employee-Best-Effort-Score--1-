@@ -450,6 +450,9 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
         (SELECT SUM(CASE WHEN cra.status = 'rm_evaluation' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
          WHERE cra.role_id = r.id) as under_evaluation,
+        (SELECT SUM(CASE WHEN cra.status IN ('rm_evaluation','submitted') AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
+         FROM candidate_role_associations cra
+         WHERE cra.role_id = r.id) as pending_submissions,
         (SELECT SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
          WHERE cra.role_id = r.id) as under_client_evaluation,
@@ -504,7 +507,7 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
       params.push(parseInt(teamId));
     }
 
-    query += " ORDER BY r.created_at DESC";
+    query += " ORDER BY pending_submissions DESC, r.created_at DESC";
 
     const roles = await db.prepare(query).bind(...params).all();
 
@@ -2218,47 +2221,55 @@ app.get("/api/rm/role-submissions/:roleId", rmOnly, async (c) => {
     .first();
   if (!access) return c.json({ error: "Forbidden" }, 403);
 
-  const rows = await db.prepare(`
-    SELECT 
-      cra.id as association_id,
-      cra.candidate_id,
-      c.name as candidate_name,
-      c.email as candidate_email,
-      c.phone as candidate_phone,
-      cra.status as association_status,
-      cra.submission_date,
-      cra.is_discarded,
-      cra.discarded_at,
-      cra.discarded_reason,
-      u.name as recruiter_name,
-      u.user_code as recruiter_code,
-      rs.id as submission_id,
-      ROUND(rs.cv_match_percent / 20.0, 2) as score,
-      rs.rm_validation_status,
-      rs.rm_rate_bill,
-      rs.rm_rate_pay,
-      rs.rm_location,
-      rs.rm_work_type,
-      rs.rm_notes,
-      rs.rm_reviewed_at
-    FROM candidate_role_associations cra
-    LEFT JOIN candidates c ON cra.candidate_id = c.id
-    LEFT JOIN users u ON cra.recruiter_user_id = u.id
-    LEFT JOIN recruiter_submissions rs 
-      ON rs.role_id = cra.role_id 
-     AND rs.recruiter_user_id = cra.recruiter_user_id 
-     AND rs.entry_type = 'submission'
-     AND DATE(rs.submission_date) = DATE(cra.submission_date)
-    WHERE cra.role_id = ?
-    ORDER BY cra.submission_date DESC, cra.id DESC
-  `).bind(roleId).all();
+  try {
+    const rows = await db.prepare(`
+      SELECT 
+        cra.id as association_id,
+        cra.candidate_id,
+        c.name as candidate_name,
+        c.email as candidate_email,
+        c.phone as candidate_phone,
+        cra.status as association_status,
+        cra.submission_date,
+        cra.is_discarded,
+        cra.discarded_at,
+        cra.discarded_reason,
+        u.name as recruiter_name,
+        u.user_code as recruiter_code,
+        rs.id as submission_id,
+        ROUND(rs.cv_match_percent / 20.0, 2) as score,
+        rs.rm_validation_status,
+        rs.rm_rate_bill,
+        rs.rm_rate_pay,
+        rs.rm_location,
+        rs.rm_work_type,
+        rs.rm_notes,
+        rs.rm_reviewed_at
+      FROM candidate_role_associations cra
+      LEFT JOIN candidates c ON cra.candidate_id = c.id
+      LEFT JOIN users u ON cra.recruiter_user_id = u.id
+      LEFT JOIN recruiter_submissions rs 
+        ON rs.role_id = cra.role_id 
+       AND rs.recruiter_user_id = cra.recruiter_user_id 
+       AND rs.entry_type = 'submission'
+       AND DATE(rs.submission_date) = DATE(cra.submission_date)
+      WHERE cra.role_id = ?
+      ORDER BY cra.submission_date DESC, cra.id DESC
+    `).bind(roleId).all();
 
   const results = rows.results || [];
+  
+  const isPending = (s: string) => s === 'rm_evaluation' || s === 'submitted';
+  
   return c.json({
-    pending_evaluation: results.filter((r: any) => (r as any).is_discarded !== 1 && (r as any).association_status === 'rm_evaluation'),
-    under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && (r as any).association_status !== 'rm_evaluation'),
+    pending_evaluation: results.filter((r: any) => (r as any).is_discarded !== 1 && isPending((r as any).association_status)),
+    under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && !isPending((r as any).association_status)),
     rejected: results.filter((r: any) => (r as any).is_discarded === 1),
   });
+} catch (error: any) {
+  console.error("Error fetching role submissions:", error);
+  return c.json({ error: error.message }, 500);
+}
 });
 
 // RM discard candidate submission
@@ -2493,80 +2504,17 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
 
 // RM submit candidate to client
 app.post("/api/rm/roles/:roleId/candidates/:candidateId/submit-to-client", rmOnly, async (c) => {
-  const db = c.env.DB;
-  const rmUser = c.get("rmUser");
-  const roleId = c.req.param("roleId");
-  const candidateId = c.req.param("candidateId");
-
-  const role = await db.prepare("SELECT team_id FROM am_roles WHERE id = ?").bind(roleId).first();
-  if (!role) return c.json({ error: "Role not found" }, 404);
-
-  const access = await db
-    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
-    .bind((rmUser as any).id, (role as any).team_id)
-    .first();
-  if (!access) return c.json({ error: "Forbidden" }, 403);
-
-  await db.prepare(`
-    UPDATE candidate_role_associations
-    SET status = 'client_submitted',
-        updated_at = CURRENT_TIMESTAMP
-    WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0
-  `).bind(roleId, candidateId).run();
-
-  return c.json({ success: true });
+  return c.json({ error: "Action not allowed. Only Account Manager can submit to client." }, 400);
 });
 
 // RM mark client rejection
 app.post("/api/rm/roles/:roleId/candidates/:candidateId/client-reject", rmOnly, async (c) => {
-  const db = c.env.DB;
-  const rmUser = c.get("rmUser");
-  const roleId = c.req.param("roleId");
-  const candidateId = c.req.param("candidateId");
-
-  const role = await db.prepare("SELECT team_id FROM am_roles WHERE id = ?").bind(roleId).first();
-  if (!role) return c.json({ error: "Role not found" }, 404);
-
-  const access = await db
-    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
-    .bind((rmUser as any).id, (role as any).team_id)
-    .first();
-  if (!access) return c.json({ error: "Forbidden" }, 403);
-
-  await db.prepare(`
-    UPDATE candidate_role_associations
-    SET status = 'client_rejected',
-        updated_at = CURRENT_TIMESTAMP
-    WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0
-  `).bind(roleId, candidateId).run();
-
-  return c.json({ success: true });
+  return c.json({ error: "Action not allowed. Only Account Manager can mark client rejection." }, 400);
 });
 
 // RM mark deal for candidate
 app.post("/api/rm/roles/:roleId/candidates/:candidateId/deal", rmOnly, async (c) => {
-  const db = c.env.DB;
-  const rmUser = c.get("rmUser");
-  const roleId = c.req.param("roleId");
-  const candidateId = c.req.param("candidateId");
-
-  const role = await db.prepare("SELECT team_id FROM am_roles WHERE id = ?").bind(roleId).first();
-  if (!role) return c.json({ error: "Role not found" }, 404);
-
-  const access = await db
-    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
-    .bind((rmUser as any).id, (role as any).team_id)
-    .first();
-  if (!access) return c.json({ error: "Forbidden" }, 403);
-
-  await db.prepare(`
-    UPDATE candidate_role_associations
-    SET status = 'deal',
-        updated_at = CURRENT_TIMESTAMP
-    WHERE role_id = ? AND candidate_id = ?
-  `).bind(roleId, candidateId).run();
-
-  return c.json({ success: true });
+  return c.json({ error: "Action not allowed. Only Account Manager can mark a deal." }, 400);
 });
 
 // RM daily custom report
@@ -2593,6 +2541,11 @@ app.get("/api/rm/reports/daily", rmOnly, async (c) => {
     const deals = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND status = 'deal' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
     const discarded = await db.prepare(`SELECT COUNT(*) as c FROM candidate_role_associations WHERE team_id IN (${ids}) AND is_discarded = 1 AND DATE(discarded_at) = DATE('now', ?)`).bind(offset).first();
     const interviews = await db.prepare(`SELECT COUNT(*) as c FROM recruiter_submissions rs INNER JOIN am_roles ar ON rs.role_id = ar.id WHERE ar.team_id IN (${ids}) AND rs.entry_type = 'interview' AND DATE(rs.submission_date) = DATE('now', ?)`).bind(offset).first();
+    const rolesStatusDeal = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE team_id IN (${ids}) AND status = 'deal' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const rolesStatusLost = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE team_id IN (${ids}) AND status = 'lost' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const rolesStatusOnHold = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE team_id IN (${ids}) AND status = 'on_hold' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const rolesStatusCancelled = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE team_id IN (${ids}) AND status = 'cancelled' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
+    const rolesStatusNoAnswer = await db.prepare(`SELECT COUNT(*) as c FROM am_roles WHERE team_id IN (${ids}) AND status = 'no_answer' AND DATE(updated_at) = DATE('now', ?)`).bind(offset).first();
     return {
       roles_created: Number((rolesCreated as any)?.c || 0),
       submissions: Number((submissions as any)?.c || 0),
@@ -2601,11 +2554,417 @@ app.get("/api/rm/reports/daily", rmOnly, async (c) => {
       interviews: Number((interviews as any)?.c || 0),
       deals: Number((deals as any)?.c || 0),
       discarded: Number((discarded as any)?.c || 0),
+      role_status_changes: {
+        deal: Number((rolesStatusDeal as any)?.c || 0),
+        lost: Number((rolesStatusLost as any)?.c || 0),
+        on_hold: Number((rolesStatusOnHold as any)?.c || 0),
+        cancelled: Number((rolesStatusCancelled as any)?.c || 0),
+        no_answer: Number((rolesStatusNoAnswer as any)?.c || 0)
+      }
     };
   };
   const day_before_yesterday = await countsFor("-2 day");
   const yesterday = await countsFor("-1 day");
   return c.json({ day_before_yesterday, yesterday });
+});
+
+app.post("/api/rm/seed/sample-data", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const perRole = Math.max(1, Math.min(Number(body?.per_role || 6), 20));
+  try {
+    const teamRows = await db
+      .prepare(`
+        SELECT t.id FROM app_teams t
+        INNER JOIN team_assignments ta ON t.id = ta.team_id
+        WHERE ta.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const clientRows = await db
+      .prepare(`
+        SELECT c.id FROM clients c
+        INNER JOIN client_assignments ca ON c.id = ca.client_id
+        WHERE ca.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const teamIds = (teamRows.results || []).map((t: any) => t.id);
+    const clientIds = (clientRows.results || []).map((c2: any) => c2.id);
+    let filter = "";
+    if (teamIds.length > 0 && clientIds.length > 0) {
+      filter = `WHERE r.team_id IN (${teamIds.join(",")}) OR r.client_id IN (${clientIds.join(",")})`;
+    } else if (teamIds.length > 0) {
+      filter = `WHERE r.team_id IN (${teamIds.join(",")})`;
+    } else if (clientIds.length > 0) {
+      filter = `WHERE r.client_id IN (${clientIds.join(",")})`;
+    }
+    const roleRows = await db
+      .prepare(`
+        SELECT r.id, r.client_id, r.team_id, r.account_manager_id, r.title 
+        FROM am_roles r
+        ${filter}
+        ORDER BY r.created_at DESC
+      `)
+      .all();
+    const roles = roleRows.results || [];
+    if (roles.length === 0) {
+      return c.json({ error: "No roles found to seed" }, 404);
+    }
+    const ensureCandidateCode = async () => {
+      const counter = await db
+        .prepare("SELECT next_number FROM code_counters WHERE category = 'candidate'")
+        .first();
+      if (!counter) {
+        await db
+          .prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 1)")
+          .run();
+        return 1;
+      }
+      return (counter as any).next_number || 1;
+    };
+    const generateCandidateCode = async () => {
+      const next = await ensureCandidateCode();
+      const code = `NL-${String(next).padStart(4, "0")}`;
+      await db
+        .prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = 'candidate'")
+        .run();
+      return code;
+    };
+    const pickRecruiterForTeam = async (teamId: number) => {
+      const rec = await db
+        .prepare("SELECT recruiter_user_id FROM recruiter_team_assignments WHERE team_id = ? LIMIT 1")
+        .bind(teamId)
+        .first();
+      if (rec) return (rec as any).recruiter_user_id;
+      const anyRec = await db
+        .prepare("SELECT id FROM users WHERE role = 'recruiter' AND is_active = 1 LIMIT 1")
+        .first();
+      return anyRec ? (anyRec as any).id : null;
+    };
+    const statuses = ["rm_evaluation", "submitted", "client_submitted", "client_rejected", "deal", "discarded"];
+    for (const role of roles) {
+      const r = role as any;
+      const recruiterId = await pickRecruiterForTeam(r.team_id);
+      if (!recruiterId) continue;
+      for (let i = 0; i < Math.min(perRole, statuses.length); i++) {
+        const status = statuses[i];
+        const daysAgo = 3 + i;
+        const submissionDate = new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+        const candCode = await generateCandidateCode();
+        const name = `Candidate ${r.title} ${status.toUpperCase()} ${i + 1}`;
+        const email = `cand_${r.id}_${status}_${i + 1}@example.com`;
+        const phone = `+1-555-01${String(r.id).padStart(2, "0")}${i}`;
+        const notes = `Auto-seeded for ${r.title} with status ${status}`;
+        const candRes = await db
+          .prepare(`
+            INSERT INTO candidates (candidate_code, name, email, phone, resume_url, notes, created_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `)
+          .bind(candCode, name, email, phone, null, notes, recruiterId)
+          .run();
+        const candidateId = candRes.meta.last_row_id;
+        const isDiscarded = status === "discarded" ? 1 : 0;
+        const assocStatus = status === "discarded" ? "rm_evaluation" : status;
+        const discardedReason = isDiscarded ? "Discarded during RM review" : null;
+        await db
+          .prepare(`
+            INSERT INTO candidate_role_associations
+            (candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, discarded_at, discarded_reason, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `)
+          .bind(
+            candidateId,
+            r.id,
+            recruiterId,
+            r.client_id,
+            r.team_id,
+            assocStatus,
+            submissionDate,
+            isDiscarded,
+            isDiscarded ? new Date().toISOString() : null,
+            discardedReason
+          )
+          .run();
+        if (!isDiscarded) {
+          const workType = i % 2 === 0 ? "SOW" : "Payroll";
+          const validationStatus = i % 2 === 0 ? "Validated" : "Pending";
+          const scorePercent = 60 + i * 5;
+          const rmRateBill = 700 + i * 25;
+          const rmRatePay = 500 + i * 20;
+          const rmLocation = i % 2 === 0 ? "Berlin" : "Madrid";
+          const rmNotes = `RM review details for ${name}`;
+          await db
+            .prepare(`
+              INSERT INTO recruiter_submissions
+              (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, candidate_name, rm_validation_status, rm_rate_bill, rm_rate_pay, rm_location, rm_work_type, cv_match_percent, rm_notes, rm_reviewed_at, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `)
+            .bind(
+              recruiterId,
+              r.client_id,
+              r.team_id,
+              r.id,
+              r.account_manager_id,
+              (rmUser as any).id,
+              i % 3 === 0 ? "after_24h" : i % 3 === 1 ? "24h" : "6h",
+              submissionDate,
+              notes,
+              "submission",
+              null,
+              name,
+              validationStatus,
+              rmRateBill,
+              rmRatePay,
+              rmLocation,
+              workType,
+              scorePercent,
+              rmNotes
+            )
+            .run();
+        }
+      }
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const recId = await pickRecruiterForTeam(r.team_id);
+      if (recId) {
+        await db
+          .prepare(`
+            INSERT INTO recruiter_submissions
+            (recruiter_user_id, client_id, team_id, role_id, account_manager_id, submission_type, submission_date, notes, entry_type, interview_level, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `)
+          .bind(recId, r.client_id, r.team_id, r.id, r.account_manager_id, "after_24h", todayStr, "Interview round 1", "interview", 1)
+          .run();
+        await db
+          .prepare(`
+            INSERT INTO recruiter_submissions
+            (recruiter_user_id, client_id, team_id, role_id, account_manager_id, submission_type, submission_date, notes, entry_type, interview_level, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `)
+          .bind(recId, r.client_id, r.team_id, r.id, r.account_manager_id, "after_24h", todayStr, "Interview round 2", "interview", 2)
+          .run();
+      }
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: "Failed to seed sample data" }, 500);
+  }
+});
+
+app.post("/api/rm/seed/reset-and-populate", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const rolesPerTeam = Math.max(1, Math.min(Number(body?.roles_per_team || 2), 10));
+  const submissionsPerRole = Math.max(1, Math.min(Number(body?.submissions_per_role || 5), 30));
+  try {
+    const teamRows = await db
+      .prepare(`
+        SELECT t.id FROM app_teams t
+        INNER JOIN team_assignments ta ON t.id = ta.team_id
+        WHERE ta.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const clientRows = await db
+      .prepare(`
+        SELECT c.id FROM clients c
+        INNER JOIN client_assignments ca ON c.id = ca.client_id
+        WHERE ca.user_id = ?
+      `)
+      .bind((rmUser as any).id)
+      .all();
+    const teamIds = (teamRows.results || []).map((t: any) => t.id);
+    const clientIds = (clientRows.results || []).map((c2: any) => c2.id);
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      return c.json({ error: "No teams or clients found for RM" }, 404);
+    }
+    let filter = "";
+    if (teamIds.length > 0 && clientIds.length > 0) {
+      filter = `WHERE r.team_id IN (${teamIds.join(",")}) OR r.client_id IN (${clientIds.join(",")})`;
+    } else if (teamIds.length > 0) {
+      filter = `WHERE r.team_id IN (${teamIds.join(",")})`;
+    } else if (clientIds.length > 0) {
+      filter = `WHERE r.client_id IN (${clientIds.join(",")})`;
+    }
+    const roleRows = await db
+      .prepare(`
+        SELECT r.id 
+        FROM am_roles r
+        ${filter}
+      `)
+      .all();
+    const roleIds = (roleRows.results || []).map((r: any) => r.id);
+    for (const roleId of roleIds) {
+      await db.prepare("DELETE FROM candidate_role_associations WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM recruiter_submissions WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM am_role_interviews WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM role_recruiter_assignments WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM am_role_teams WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM role_status_pending WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM dropout_requests WHERE role_id = ?").bind(roleId).run();
+      await db.prepare("DELETE FROM am_roles WHERE id = ?").bind(roleId).run();
+    }
+    const anyClientRow = clientIds.length === 0
+      ? await db.prepare("SELECT id FROM clients ORDER BY id LIMIT 1").first()
+      : null;
+    const anyClientId = anyClientRow ? (anyClientRow as any).id : null;
+    const ensureRoleCodeCounter = async () => {
+      const counter = await db.prepare("SELECT next_number FROM code_counters WHERE category = 'role'").first();
+      if (!counter) {
+        await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('role', 2)").run();
+        return 1;
+      }
+      return (counter as any).next_number || 1;
+    };
+    const generateRoleCode = async () => {
+      const next = await ensureRoleCodeCounter();
+      const code = `ROL-${String(next).padStart(3, "0")}`;
+      await db.prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = 'role'").run();
+      return code;
+    };
+    const pickAMFor = async (teamId: number | null, clientId: number | null) => {
+      if (clientId != null) {
+        const am = await db
+          .prepare(`
+            SELECT u.id FROM users u
+            INNER JOIN client_assignments ca ON u.id = ca.user_id
+            WHERE ca.client_id = ? AND u.role = 'account_manager' AND u.is_active = 1
+            LIMIT 1
+          `)
+          .bind(clientId)
+          .first();
+        if (am) return (am as any).id;
+      }
+      if (teamId != null) {
+        const am2 = await db
+          .prepare(`
+            SELECT u.id FROM users u
+            INNER JOIN team_assignments ta ON u.id = ta.user_id
+            WHERE ta.team_id = ? AND u.role = 'account_manager' AND u.is_active = 1
+            LIMIT 1
+          `)
+          .bind(teamId)
+          .first();
+        if (am2) return (am2 as any).id;
+      }
+      const anyAm = await db
+        .prepare("SELECT id FROM users WHERE role = 'account_manager' AND is_active = 1 LIMIT 1")
+        .first();
+      return anyAm ? (anyAm as any).id : null;
+    };
+    const ensureCandidateCode = async () => {
+      const counter = await db.prepare("SELECT next_number FROM code_counters WHERE category = 'candidate'").first();
+      if (!counter) {
+        await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 1)").run();
+        return 1;
+      }
+      return (counter as any).next_number || 1;
+    };
+    const generateCandidateCode = async () => {
+      const next = await ensureCandidateCode();
+      const code = `NL-${String(next).padStart(4, "0")}`;
+      await db.prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = 'candidate'").run();
+      return code;
+    };
+    const pickRecruiterForTeam = async (teamId: number) => {
+      const rec = await db
+        .prepare("SELECT recruiter_user_id FROM recruiter_team_assignments WHERE team_id = ? LIMIT 1")
+        .bind(teamId)
+        .first();
+      if (rec) return (rec as any).recruiter_user_id;
+      const anyRec = await db
+        .prepare("SELECT id FROM users WHERE role = 'recruiter' AND is_active = 1 LIMIT 1")
+        .first();
+      return anyRec ? (anyRec as any).id : null;
+    };
+    let createdRoles = 0;
+    let createdSubmissions = 0;
+    for (let tIndex = 0; tIndex < teamIds.length; tIndex++) {
+      const teamId = teamIds[tIndex];
+      for (let r = 0; r < rolesPerTeam; r++) {
+        const clientId = clientIds.length > 0 ? clientIds[(tIndex + r) % clientIds.length] : anyClientId;
+        if (!clientId) continue;
+        const amId = await pickAMFor(teamId, clientId);
+        if (!amId) continue;
+        const roleCode = await generateRoleCode();
+        const title = `Seed Role ${teamId}-${r + 1}`;
+        const result = await db
+          .prepare(`
+            INSERT INTO am_roles (role_code, client_id, team_id, account_manager_id, title, description, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `)
+          .bind(roleCode, clientId, teamId, amId, title, `Auto-seeded for team ${teamId}`)
+          .run();
+        const roleId = result.meta.last_row_id;
+        createdRoles++;
+        const recruiterId = await pickRecruiterForTeam(teamId);
+        if (!recruiterId) continue;
+        for (let i = 0; i < submissionsPerRole; i++) {
+          const submissionDate = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+          const candCode = await generateCandidateCode();
+          const name = `Candidate ${title} ${i + 1}`;
+          const email = `cand_${roleId}_rm_eval_${i + 1}@example.com`;
+          const phone = `+1-555-${String(roleId).padStart(4, "0")}${String(i).padStart(2, "0")}`;
+          const notes = `Seed submission for ${title}`;
+          const candRes = await db
+            .prepare(`
+              INSERT INTO candidates (candidate_code, name, email, phone, resume_url, notes, created_by_user_id, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `)
+            .bind(candCode, name, email, phone, null, notes, recruiterId)
+            .run();
+          const candidateId = candRes.meta.last_row_id;
+          await db
+            .prepare(`
+              INSERT INTO candidate_role_associations
+              (candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, 'rm_evaluation', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `)
+            .bind(candidateId, roleId, recruiterId, clientId, teamId, submissionDate)
+            .run();
+          await db
+            .prepare(`
+              INSERT INTO recruiter_submissions
+              (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, candidate_name, rm_validation_status, rm_rate_bill, rm_rate_pay, rm_location, rm_work_type, cv_match_percent, rm_notes, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'submission', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `)
+            .bind(
+              recruiterId,
+              clientId,
+              teamId,
+              roleId,
+              amId,
+              (rmUser as any).id,
+              i % 3 === 0 ? "after_24h" : i % 3 === 1 ? "24h" : "6h",
+              submissionDate,
+              notes,
+              null,
+              name,
+              "Pending",
+              null,
+              null,
+              null,
+              null,
+              0,
+              null
+            )
+            .run();
+          createdSubmissions++;
+        }
+      }
+    }
+    return c.json({ success: true, created_roles: createdRoles, created_submissions: createdSubmissions });
+  } catch (error) {
+    return c.json({ error: "Failed to reset and populate roles" }, 500);
+  }
 });
 
 export default app;

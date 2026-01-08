@@ -369,7 +369,7 @@ app.post('/candidates/:id/associate', async (c) => {
       user.id,
       client_id,
       team_id,
-      status || 'submitted',
+      status || 'rm_evaluation',
       submission_date
     ).run();
 

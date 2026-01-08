@@ -41,8 +41,10 @@ interface Role {
   account_manager_code: string;
   created_at: string;
   total_submissions?: number;
+  under_evaluation?: number;
   under_client_evaluation?: number;
   client_rejected?: number;
+  in_play_submissions?: number;
   total_interviews?: number;
 }
 
@@ -73,6 +75,7 @@ interface RoleSubmission {
   candidate_name: string;
   candidate_email: string;
   candidate_phone: string;
+  association_status?: string;
   submission_date: string;
   is_discarded: number;
   discarded_at?: string;
@@ -122,6 +125,7 @@ export default function RMRoles() {
     rejected: [],
   });
   const [reviewEdits, setReviewEdits] = useState<Record<number, { rm_validation_status?: string; rm_payment?: string; rm_location?: string; rm_work_type?: string; rm_notes?: string; rm_score_0_5?: string }>>({});
+  const [acceptOpen, setAcceptOpen] = useState<Record<number, boolean>>({});
   const submissionsRef = useRef<HTMLDivElement | null>(null);
   const [detailsTab, setDetailsTab] = useState<'role' | 'submissions'>('submissions');
   const underCons = submissions.under_consideration || [];
@@ -129,7 +133,7 @@ export default function RMRoles() {
   const submittedToClient = underCons.filter((i: any) => (i as any).association_status === 'client_submitted');
   const clientRejected = underCons.filter((i: any) => (i as any).association_status === 'client_rejected');
   const inPlay = underCons.filter((i: any) => !['submitted','client_submitted','client_rejected','deal'].includes((i as any).association_status));
-  const totalAllSubmissions = (submissions.pending_evaluation?.length || 0) + (submissions.under_consideration?.length || 0) + (submissions.rejected?.length || 0);
+  const pendingEvalCount = submissions.pending_evaluation?.length || 0;
 
   const [dailyReport, setDailyReport] = useState<{ day_before_yesterday: DailyStats; yesterday: DailyStats } | null>(null);
 
@@ -975,6 +979,520 @@ export default function RMRoles() {
                 </div>
               </div>
               )}
+              {detailsTab === 'submissions' && (
+              <div ref={submissionsRef}>
+                <div className="mt-6 bg-white border border-slate-200 rounded-2xl">
+                  <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-indigo-600" />
+                      <span className="font-semibold text-slate-800">Submissions</span>
+                    </div>
+                    {loadingSubmissions && (
+                      <div className="text-sm text-slate-500">Loading…</div>
+                    )}
+                  </div>
+                  <div className="p-6">
+                    {pendingEvalCount > 0 && (
+                      <div className="sticky top-0 bg-white z-10 mb-4">
+                        <button
+                          onClick={async () => {
+                            if (selectedRole) {
+                              await loadRoleSubmissions(selectedRole.id);
+                            }
+                            const firstPending = submissions.pending_evaluation[0];
+                            if (firstPending) {
+                              setAcceptOpen(prev => ({ ...prev, [(firstPending.submission_id || firstPending.association_id)!]: true }));
+                              submissionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }
+                          }}
+                          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          <span className="font-medium">Review Pending Candidates ({pendingEvalCount})</span>
+                        </button>
+                      </div>
+                    )}
+                    {!loadingSubmissions && submissions.pending_evaluation.length === 0 && submissions.under_consideration.length === 0 && submissions.rejected.length === 0 ? (
+                      <div className="text-center py-8 bg-slate-50 rounded-xl">
+                        <Briefcase className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+                        <p className="text-slate-600">No submissions yet</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-8">
+                        {submissions.pending_evaluation.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <Clock className="w-4 h-4 text-indigo-600" />
+                              <span className="text-sm font-semibold text-slate-700">Pending Evaluation</span>
+                            </div>
+                            <div className="space-y-3">
+                              {submissions.pending_evaluation.map(item => (
+                                <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-800">{item.candidate_name}</span>
+                                        <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
+                                          Pending Evaluation
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1">
+                                        {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                        Submitted on {new Date(item.submission_date).toLocaleDateString()}
+                                      </div>
+                                      {acceptOpen[(item.submission_id || item.association_id)!] && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+                                          <input
+                                            type="text"
+                                            placeholder="Validation status"
+                                            defaultValue={item.rm_validation_status || ''}
+                                            onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_validation_status', e.target.value)}
+                                            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          />
+                                          <input
+                                            type="number"
+                                            step="0.1"
+                                            min={0}
+                                            max={5}
+                                            placeholder="Validation score (0-5)"
+                                            defaultValue={item.cv_match_percent != null ? String(Number(item.cv_match_percent) / 20) : (item as any).score != null ? String((item as any).score) : ''}
+                                            onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_score_0_5', e.target.value)}
+                                            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          />
+                                          <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                            <input
+                                              type="number"
+                                              placeholder="Payment"
+                                              defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
+                                              onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_payment', e.target.value)}
+                                              className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                            />
+                                            {(() => {
+                                              const wt = (reviewEdits[(item.submission_id || item.association_id)!]?.rm_work_type || item.rm_work_type || '').toLowerCase();
+                                              const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
+                                              return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
+                                            })()}
+                                          </div>
+                                          <input
+                                            type="text"
+                                            placeholder="Location"
+                                            defaultValue={item.rm_location || ''}
+                                            onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_location', e.target.value)}
+                                            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          />
+                                          <select
+                                            defaultValue={item.rm_work_type || ''}
+                                            onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_work_type', e.target.value)}
+                                            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          >
+                                            <option value="">Select contract type</option>
+                                            <option value="SOW">SOW</option>
+                                            <option value="Payroll">Payroll</option>
+                                          </select>
+                                          <input
+                                            type="text"
+                                            placeholder="Notes"
+                                            defaultValue={item.rm_notes || ''}
+                                            onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_notes', e.target.value)}
+                                            className="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2"
+                                          />
+                                        </div>
+                                      )}
+                                      {item.rm_reviewed_at && (
+                                        <div className="mt-2 text-xs text-slate-500">
+                                          Validation date: {new Date(item.rm_reviewed_at).toLocaleString()}
+                                        </div>
+                                      )}
+                                      <div className="mt-2 text-xs text-slate-500">
+                                        Recruiter: {item.recruiter_name} ({item.recruiter_code})
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                      {acceptOpen[(item.submission_id || item.association_id)!] ? (
+                                        <>
+                                          <button
+                                            onClick={() => saveReview(item.submission_id, selectedRole!.id, item.candidate_id, item.association_id)}
+                                            className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                          >
+                                            <Save className="w-4 h-4" />
+                                            Save Details
+                                          </button>
+                                          <button
+                                            onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
+                                            className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                          >
+                                            <User className="w-4 h-4" />
+                                            Accept and Send to AM
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => setAcceptOpen(prev => ({ ...prev, [(item.submission_id || item.association_id)!]: true }))}
+                                            className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+                                          >
+                                            Accept
+                                          </button>
+                                          <button
+                                            onClick={() => discardCandidate(selectedRole!.id, item.candidate_id)}
+                                            className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                            Reject
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {submittedToAM.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <CheckCircle className="w-4 h-4 text-indigo-600" />
+                              <span className="text-sm font-semibold text-slate-700">Submitted to AM</span>
+                            </div>
+                            <div className="space-y-3">
+                              {submittedToAM.map(item => (
+                                <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-800">{item.candidate_name}</span>
+                                        <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
+                                        {(() => {
+                                          const s = (item as any).association_status;
+                                          if (s === 'submitted') {
+                                            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Submitted to AM</span>;
+                                          }
+                                          if (s === 'client_submitted') {
+                                            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>;
+                                          }
+                                          if (s === 'client_rejected') {
+                                            return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>;
+                                          }
+                                          return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>;
+                                        })()}
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1">
+                                        {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                        Submitted on {new Date(item.submission_date).toLocaleDateString()}
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+                                        <input
+                                          type="text"
+                                          placeholder="Validation status"
+                                          defaultValue={item.rm_validation_status || ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_validation_status', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                        <input
+                                          type="number"
+                                          step="0.1"
+                                          min={0}
+                                          max={5}
+                                          placeholder="Validation score (0-5)"
+                                          defaultValue={(item as any).score != null ? String((item as any).score) : ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_score_0_5', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                        <div className="relative">
+                                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                          <input
+                                            type="number"
+                                            placeholder="Payment"
+                                            defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
+                                            onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_payment', e.target.value)}
+                                            className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                            disabled={!item.submission_id}
+                                          />
+                                          {(() => {
+                                            const wt = (reviewEdits[item.submission_id || 0]?.rm_work_type || item.rm_work_type || '').toLowerCase();
+                                            const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
+                                            return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
+                                          })()}
+                                        </div>
+                                        <input
+                                          type="text"
+                                          placeholder="Location"
+                                          defaultValue={item.rm_location || ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_location', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                        <select
+                                          defaultValue={item.rm_work_type || ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_work_type', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        >
+                                          <option value="">Select contract type</option>
+                                          <option value="SOW">SOW</option>
+                                          <option value="Payroll">Payroll</option>
+                                        </select>
+                                        <input
+                                          type="text"
+                                          placeholder="Notes"
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_notes', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                      </div>
+                                      {item.rm_reviewed_at && (
+                                        <div className="mt-2 text-xs text-slate-500">
+                                          Validation date: {new Date(item.rm_reviewed_at).toLocaleString()}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                      <button
+                                        onClick={() => discardCandidate(selectedRole!.id, item.candidate_id)}
+                                        className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                        Reject
+                                      </button>
+                                      <button
+                                        onClick={() => saveReview(item.submission_id)}
+                                        disabled={!item.submission_id}
+                                        className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                      >
+                                        <Save className="w-4 h-4" />
+                                        Save Review
+                                      </button>
+                                      <button
+                                        onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
+                                        disabled={!item.submission_id}
+                                        className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                      >
+                                        <User className="w-4 h-4" />
+                                        Send to AM
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="mt-3 text-xs text-slate-500">
+                                    Recruiter: {item.recruiter_name} ({item.recruiter_code})
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {submittedToClient.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <CheckCircle className="w-4 h-4 text-blue-600" />
+                              <span className="text-sm font-semibold text-slate-700">Submitted to Client</span>
+                            </div>
+                            <div className="space-y-3">
+                              {submittedToClient.map(item => (
+                                <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-800">{item.candidate_name}</span>
+                                        <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1">{item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}</div>
+                                      <div className="text-xs text-slate-500 mt-1">Submitted on {new Date(item.submission_date).toLocaleDateString()}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {clientRejected.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <XCircle className="w-4 h-4 text-red-600" />
+                              <span className="text-sm font-semibold text-slate-700">Client Rejected</span>
+                            </div>
+                            <div className="space-y-3">
+                              {clientRejected.map(item => (
+                                <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-800">{item.candidate_name}</span>
+                                        <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {inPlay.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <CheckCircle className="w-4 h-4 text-emerald-600" />
+                              <span className="text-sm font-semibold text-slate-700">In Play</span>
+                            </div>
+                            <div className="space-y-3">
+                              {inPlay.map(item => (
+                                <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-800">{item.candidate_name}</span>
+                                        <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1">
+                                        {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                        Submitted on {new Date(item.submission_date).toLocaleDateString()}
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+                                        <input
+                                          type="text"
+                                          placeholder="Validation status"
+                                          defaultValue={item.rm_validation_status || ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_validation_status', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                        <input
+                                          type="number"
+                                          step="0.1"
+                                          min={0}
+                                          max={5}
+                                          placeholder="Validation score (0-5)"
+                                          defaultValue={(item as any).score != null ? String((item as any).score) : ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_score_0_5', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                        <div className="relative">
+                                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                          <input
+                                            type="number"
+                                            placeholder="Payment"
+                                            defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
+                                            onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_payment', e.target.value)}
+                                            className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                            disabled={!item.submission_id}
+                                          />
+                                          {(() => {
+                                            const wt = (reviewEdits[item.submission_id || 0]?.rm_work_type || item.rm_work_type || '').toLowerCase();
+                                            const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
+                                            return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
+                                          })()}
+                                        </div>
+                                        <input
+                                          type="text"
+                                          placeholder="Location"
+                                          defaultValue={item.rm_location || ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_location', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                        <select
+                                          defaultValue={item.rm_work_type || ''}
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_work_type', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        >
+                                          <option value="">Select contract type</option>
+                                          <option value="SOW">SOW</option>
+                                          <option value="Payroll">Payroll</option>
+                                        </select>
+                                        <input
+                                          type="text"
+                                          placeholder="Notes"
+                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_notes', e.target.value)}
+                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                                          disabled={!item.submission_id}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                      <button
+                                        onClick={() => discardCandidate(selectedRole!.id, item.candidate_id)}
+                                        className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                        Reject
+                                      </button>
+                                      <button
+                                        onClick={() => saveReview(item.submission_id)}
+                                        disabled={!item.submission_id}
+                                        className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                      >
+                                        <Save className="w-4 h-4" />
+                                        Save Review
+                                      </button>
+                                      <button
+                                        onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
+                                        disabled={!item.submission_id}
+                                        className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                      >
+                                        <User className="w-4 h-4" />
+                                        Send to AM
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {submissions.rejected.length > 0 && (
+                          <div>
+                            <div className="flex items-center gap-2 mb-3">
+                              <XCircle className="w-4 h-4 text-red-600" />
+                              <span className="text-sm font-semibold text-slate-700">Rejected</span>
+                            </div>
+                            <div className="space-y-3">
+                              {submissions.rejected.map(item => (
+                                <div key={item.association_id} className="border border-slate-200 rounded-xl p-4 bg-red-50/40">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-800">{item.candidate_name}</span>
+                                        <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1">
+                                        {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
+                                      </div>
+                                      <div className="text-xs text-slate-500 mt-1">
+                                        Discarded on {item.discarded_at ? new Date(item.discarded_at).toLocaleDateString() : 'N/A'}
+                                      </div>
+                                      <div className="text-xs text-slate-600 mt-1">
+                                        Reason: {item.discarded_reason || 'N/A'}
+                                      </div>
+                                    </div>
+                                    <div className="text-xs text-slate-500">
+                                      Recruiter: {item.recruiter_name} ({item.recruiter_code})
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              )}
             </div>
 
             {/* Modal Footer */}
@@ -999,420 +1517,7 @@ export default function RMRoles() {
                 Edit Role
               </button>
             </div>
-            {detailsTab === 'submissions' && (
-            <div className="px-8 pb-8" ref={submissionsRef}>
-              <div className="mt-6 bg-white border border-slate-200 rounded-2xl">
-                <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Briefcase className="w-5 h-5 text-indigo-600" />
-                    <span className="font-semibold text-slate-800">Submissions</span>
-                  </div>
-                  {loadingSubmissions && (
-                    <div className="text-sm text-slate-500">Loading…</div>
-                  )}
-                </div>
-                <div className="p-6">
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
-                    <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100">
-                      <p className="text-xs text-indigo-700 mb-1 font-semibold">Total Submissions</p>
-                      <p className="text-2xl font-bold text-indigo-600">{totalAllSubmissions}</p>
-                    </div>
-                    <div className="bg-yellow-50 rounded-lg p-3 border border-yellow-100">
-                      <p className="text-xs text-yellow-700 mb-1 font-semibold">Pending Evaluation</p>
-                      <p className="text-2xl font-bold text-yellow-700">{submissions.pending_evaluation.length}</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
-                      <p className="text-xs text-emerald-700 mb-1 font-semibold">Submitted to AM</p>
-                      <p className="text-2xl font-bold text-emerald-700">{submittedToAM.length}</p>
-                    </div>
-                    <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                      <p className="text-xs text-slate-700 mb-1 font-semibold">In Play</p>
-                      <p className="text-2xl font-bold text-slate-900">{inPlay.length}</p>
-                    </div>
-                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
-                      <p className="text-xs text-blue-700 mb-1 font-semibold">Submitted to Client</p>
-                      <p className="text-2xl font-bold text-blue-600">{submittedToClient.length}</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-3 border border-red-100">
-                      <p className="text-xs text-red-700 mb-1 font-semibold">Client Rejected</p>
-                      <p className="text-2xl font-bold text-red-700">{clientRejected.length}</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-3 border border-red-100">
-                      <p className="text-xs text-red-700 mb-1 font-semibold">Rejected</p>
-                      <p className="text-2xl font-bold text-red-700">{submissions.rejected.length}</p>
-                    </div>
-                    <div className="bg-purple-50 rounded-lg p-3 border border-purple-100">
-                      <p className="text-xs text-purple-700 mb-1 font-semibold">Total Interviews</p>
-                      <p className="text-2xl font-bold text-purple-700">{selectedRole.total_interviews ?? 0}</p>
-                    </div>
-                  </div>
-                  {submissions.pending_evaluation.length === 0 && submissions.under_consideration.length === 0 && submissions.rejected.length === 0 ? (
-                    <div className="text-center py-8 bg-slate-50 rounded-xl">
-                      <Briefcase className="w-10 h-10 text-slate-400 mx-auto mb-2" />
-                      <p className="text-slate-600">No submissions yet</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-8">
-                      {submissions.pending_evaluation.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <Clock className="w-4 h-4 text-indigo-600" />
-                            <span className="text-sm font-semibold text-slate-700">Pending Evaluation</span>
-                          </div>
-                          <div className="space-y-3">
-                            {submissions.pending_evaluation.map(item => (
-                              <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-slate-800">{item.candidate_name}</span>
-                                      <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
-                                        Pending Evaluation
-                                      </span>
-                                    </div>
-                                    <div className="text-xs text-slate-600 mt-1">
-                                      {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      Submitted on {new Date(item.submission_date).toLocaleDateString()}
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
-                                      <input
-                                        type="text"
-                                        placeholder="Validation status"
-                                        defaultValue={item.rm_validation_status || ''}
-                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_validation_status', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                      />
-                                      <input
-                                        type="number"
-                                        step="0.1"
-                                        min={0}
-                                        max={5}
-                                        placeholder="Validation score (0-5)"
-                                        defaultValue={item.cv_match_percent != null ? String(Number(item.cv_match_percent) / 20) : (item as any).score != null ? String((item as any).score) : ''}
-                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_score_0_5', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                      />
-                                      <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
-                                        <input
-                                          type="number"
-                                          placeholder="Payment"
-                                          defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
-                                          onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_payment', e.target.value)}
-                                          className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
-                                        />
-                                        {(() => {
-                                          const wt = (reviewEdits[(item.submission_id || item.association_id)!]?.rm_work_type || item.rm_work_type || '').toLowerCase();
-                                          const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
-                                          return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
-                                        })()}
-                                      </div>
-                                      <input
-                                        type="text"
-                                        placeholder="Location"
-                                        defaultValue={item.rm_location || ''}
-                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_location', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                      />
-                                      <select
-                                        defaultValue={item.rm_work_type || ''}
-                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_work_type', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                      >
-                                        <option value="">Select contract type</option>
-                                        <option value="SOW">SOW</option>
-                                        <option value="Payroll">Payroll</option>
-                                      </select>
-                                      <input
-                                        type="text"
-                                        placeholder="Notes"
-                                        defaultValue={item.rm_notes || ''}
-                                        onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_notes', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm md:col-span-2"
-                                      />
-                                    </div>
-                                    {item.rm_reviewed_at && (
-                                      <div className="mt-2 text-xs text-slate-500">
-                                        Validation date: {new Date(item.rm_reviewed_at).toLocaleString()}
-                                      </div>
-                                    )}
-                                    <div className="mt-2 text-xs text-slate-500">
-                                      Recruiter: {item.recruiter_name} ({item.recruiter_code})
-                                    </div>
-                                  </div>
-                                  <div className="flex flex-col items-end gap-2">
-                                    <button
-                                      onClick={() => discardCandidate(selectedRole!.id, item.candidate_id)}
-                                      className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                      Discard
-                                    </button>
-                                    <button
-                                      onClick={() => saveReview(item.submission_id, selectedRole!.id, item.candidate_id, item.association_id)}
-                                      className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
-                                    >
-                                      <Save className="w-4 h-4" />
-                                      Save Review
-                                    </button>
-                                    <button
-                                      onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
-                                      className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1 disabled:opacity-50"
-                                    >
-                                      <User className="w-4 h-4" />
-                                      Send to AM
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {submittedToAM.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <CheckCircle className="w-4 h-4 text-indigo-600" />
-                            <span className="text-sm font-semibold text-slate-700">Submitted to AM</span>
-                          </div>
-                          <div className="space-y-3">
-                            {submittedToAM.map(item => (
-                              <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-slate-800">{item.candidate_name}</span>
-                                      <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
-                                      {(() => {
-                                        const s = (item as any).association_status;
-                                        if (s === 'submitted') {
-                                          return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">Submitted to AM</span>;
-                                        }
-                                        if (s === 'client_submitted') {
-                                          return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>;
-                                        }
-                                        if (s === 'client_rejected') {
-                                          return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>;
-                                        }
-                                        return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>;
-                                      })()}
-                                    </div>
-                                    <div className="text-xs text-slate-600 mt-1">
-                                      {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      Submitted on {new Date(item.submission_date).toLocaleDateString()}
-                                    </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
-                                      <input
-                                        type="text"
-                                        placeholder="Validation status"
-                                        defaultValue={item.rm_validation_status || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_validation_status', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
-                                      <input
-                                        type="number"
-                                        step="0.1"
-                                        min={0}
-                                        max={5}
-                                        placeholder="Validation score (0-5)"
-                                        defaultValue={(item as any).score != null ? String((item as any).score) : ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_score_0_5', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
-                                      <div className="relative">
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
-                                        <input
-                                          type="number"
-                                          placeholder="Payment"
-                                          defaultValue={item.rm_rate_bill !== undefined ? String(item.rm_rate_bill) : ''}
-                                          onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_payment', e.target.value)}
-                                          className="pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
-                                          disabled={!item.submission_id}
-                                        />
-                                        {(() => {
-                                          const wt = (reviewEdits[item.submission_id || 0]?.rm_work_type || item.rm_work_type || '').toLowerCase();
-                                          const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
-                                          return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
-                                        })()}
-                                      </div>
-                                      <input
-                                        type="text"
-                                        placeholder="Location"
-                                        defaultValue={item.rm_location || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_location', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
-                                      <select
-                                        defaultValue={item.rm_work_type || ''}
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_work_type', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      >
-                                        <option value="">Select contract type</option>
-                                        <option value="SOW">SOW</option>
-                                        <option value="Payroll">Payroll</option>
-                                      </select>
-                                      <input
-                                        type="text"
-                                        placeholder="Notes"
-                                        onChange={(e) => updateReviewEdit(item.submission_id || 0, 'rm_notes', e.target.value)}
-                                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                                        disabled={!item.submission_id}
-                                      />
-                                    </div>
-                                    {item.rm_reviewed_at && (
-                                      <div className="mt-2 text-xs text-slate-500">
-                                        Validation date: {new Date(item.rm_reviewed_at).toLocaleString()}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="flex flex-col items-end gap-2">
-                                    <button
-                                      onClick={() => discardCandidate(selectedRole!.id, item.candidate_id)}
-                                      className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-1"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                      Discard
-                                    </button>
-                                    <button
-                                      onClick={() => saveReview(item.submission_id)}
-                                      disabled={!item.submission_id}
-                                      className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50"
-                                    >
-                                      <Save className="w-4 h-4" />
-                                      Save Review
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="mt-3 text-xs text-slate-500">
-                                  Recruiter: {item.recruiter_name} ({item.recruiter_code})
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {submittedToClient.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <CheckCircle className="w-4 h-4 text-blue-600" />
-                            <span className="text-sm font-semibold text-slate-700">Submitted to Client</span>
-                          </div>
-                          <div className="space-y-3">
-                            {submittedToClient.map(item => (
-                              <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-slate-800">{item.candidate_name}</span>
-                                      <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-100 text-blue-800 border border-blue-200">Submitted to Client</span>
-                                    </div>
-                                    <div className="text-xs text-slate-600 mt-1">{item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}</div>
-                                    <div className="text-xs text-slate-500 mt-1">Submitted on {new Date(item.submission_date).toLocaleDateString()}</div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {clientRejected.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <XCircle className="w-4 h-4 text-red-600" />
-                            <span className="text-sm font-semibold text-slate-700">Client Rejected</span>
-                          </div>
-                          <div className="space-y-3">
-                            {clientRejected.map(item => (
-                              <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-slate-800">{item.candidate_name}</span>
-                                      <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-red-100 text-red-800 border border-red-200">Client Rejected</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {inPlay.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <CheckCircle className="w-4 h-4 text-emerald-600" />
-                            <span className="text-sm font-semibold text-slate-700">In Play</span>
-                          </div>
-                          <div className="space-y-3">
-                            {inPlay.map(item => (
-                              <div key={item.association_id} className="border border-slate-200 rounded-xl p-4">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-slate-800">{item.candidate_name}</span>
-                                      <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">In Play</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      
-                      {submissions.rejected.length > 0 && (
-                        <div>
-                          <div className="flex items-center gap-2 mb-3">
-                            <XCircle className="w-4 h-4 text-red-600" />
-                            <span className="text-sm font-semibold text-slate-700">Rejected</span>
-                          </div>
-                          <div className="space-y-3">
-                            {submissions.rejected.map(item => (
-                              <div key={item.association_id} className="border border-slate-200 rounded-xl p-4 bg-red-50/40">
-                                <div className="flex items-start justify-between gap-4">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-slate-800">{item.candidate_name}</span>
-                                      <span className="text-xs text-slate-500 font-mono">{item.candidate_id}</span>
-                                    </div>
-                                    <div className="text-xs text-slate-600 mt-1">
-                                      {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                      Discarded on {item.discarded_at ? new Date(item.discarded_at).toLocaleDateString() : 'N/A'}
-                                    </div>
-                                    <div className="text-xs text-slate-600 mt-1">
-                                      Reason: {item.discarded_reason || 'N/A'}
-                                    </div>
-                                  </div>
-                                  <div className="text-xs text-slate-500">
-                                    Recruiter: {item.recruiter_name} ({item.recruiter_code})
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            )}
+            
           </div>
         </div>
       )}

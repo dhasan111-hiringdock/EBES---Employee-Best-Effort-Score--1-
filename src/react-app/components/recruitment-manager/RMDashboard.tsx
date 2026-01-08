@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Briefcase, Users, TrendingUp, Award, Target, CheckCircle, AlertCircle } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
 import ScoreTooltip from '@/react-app/components/shared/ScoreTooltip';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 interface EBESData {
   score: number;
@@ -29,14 +29,22 @@ export default function RMDashboard() {
   const [loading, setLoading] = useState(true);
   const [newSubmissionsCount, setNewSubmissionsCount] = useState(0);
   const [pendingList, setPendingList] = useState<Array<any>>([]);
+  const [dailyReport, setDailyReport] = useState<{ day_before_yesterday: any; yesterday: any } | null>(null);
+  const dailySectionRef = useRef<HTMLDivElement | null>(null);
+  const location = useLocation();
 
   useEffect(() => {
     fetchDashboardData();
     fetchNewSubmissionNotifications();
     fetchPendingList();
+    fetchDailyReport();
   }, []);
 
- 
+  useEffect(() => {
+    if (!loading && dailyReport && location.pathname.endsWith('/rm/daily-report')) {
+      dailySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [loading, dailyReport, location.pathname]);
 
   const fetchDashboardData = async () => {
     try {
@@ -83,6 +91,15 @@ export default function RMDashboard() {
       const res = await fetchWithAuth('/api/rm/pending-submissions?limit=100');
       if (res.ok) {
         setPendingList(await res.json());
+      }
+    } catch {}
+  };
+
+  const fetchDailyReport = async () => {
+    try {
+      const res = await fetchWithAuth('/api/rm/reports/daily');
+      if (res.ok) {
+        setDailyReport(await res.json());
       }
     } catch {}
   };
@@ -236,6 +253,60 @@ export default function RMDashboard() {
           </div>
         </div>
       </div>
+
+      {dailyReport && (
+        <div ref={dailySectionRef} className="bg-white rounded-xl shadow-sm border border-slate-200">
+          <div className="p-6 border-b border-slate-200">
+            <h2 className="text-xl font-bold text-slate-800">Daily Report</h2>
+            <p className="text-sm text-slate-600 mt-1">Yesterday vs day before yesterday</p>
+          </div>
+          <div className="p-6 overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead>
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-600">Metric</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-600">Yesterday</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-600">Day Before</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {[
+                  { key: 'roles_created', label: 'Roles Created' },
+                  { key: 'submissions', label: 'Submissions' },
+                  { key: 'forwarded_to_client', label: 'Forwarded to Client' },
+                  { key: 'client_rejected', label: 'Client Rejected' },
+                  { key: 'interviews', label: 'Interviews' },
+                  { key: 'deals', label: 'Deals' },
+                  { key: 'discarded', label: 'Discarded Candidates' },
+                ].map((row) => (
+                  <tr key={row.key}>
+                    <td className="px-4 py-2 text-sm text-slate-700">{row.label}</td>
+                    <td className="px-4 py-2 text-sm font-semibold text-slate-900">{(dailyReport as any).yesterday?.[row.key] ?? 0}</td>
+                    <td className="px-4 py-2 text-sm text-slate-700">{(dailyReport as any).day_before_yesterday?.[row.key] ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-4">
+              <div className="text-sm text-slate-700 font-semibold mb-2">Role Status Changes</div>
+              <div className="grid grid-cols-5 gap-3">
+                {[
+                  { key: 'deal', label: 'Deal' },
+                  { key: 'lost', label: 'Lost' },
+                  { key: 'on_hold', label: 'On Hold' },
+                  { key: 'cancelled', label: 'Cancelled' },
+                  { key: 'no_answer', label: 'No Answer' },
+                ].map((s) => (
+                  <div key={s.key} className="bg-slate-50 rounded-lg p-3 text-center">
+                    <div className="text-xs text-slate-500 mb-1">{s.label}</div>
+                    <div className="text-lg font-bold text-slate-800">{(dailyReport as any).yesterday?.role_status_changes?.[s.key] ?? 0}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">

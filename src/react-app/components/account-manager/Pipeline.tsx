@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import { useLocation } from "react-router";
 
 interface Role {
   id: number;
@@ -118,6 +119,16 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
     }
     return { submittedToClient, clientRejected, discarded };
   }, [dataByRole]);
+  const location = useLocation();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const assoc = params.get('association_id');
+    if (!assoc) return;
+    const el = document.getElementById(`assoc-${assoc}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [location.search, dataByRole, roles]);
   const exportRoleRows = (roleId: number, roleCode: string) => {
     const bucket = dataByRole[roleId] || { under_consideration: [], rejected: [] };
     const rows = [...(bucket.under_consideration || []), ...(bucket.rejected || [])];
@@ -397,7 +408,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                           return sortOrder === "desc" ? db - da : da - db;
                         });
                         return sorted.map((row) => (
-                          <tr key={row.association_id || `${row.candidate_id}-${row.submission_id || 0}`} className="border-b border-gray-100 hover:bg-gray-50">
+                          <tr id={`assoc-${row.association_id}`} key={row.association_id || `${row.candidate_id}-${row.submission_id || 0}`} className="border-b border-gray-100 hover:bg-gray-50">
                             <td className="py-2 px-3">
                               <div className="font-medium text-gray-900">{row.candidate_name || "Unknown"}</div>
                               <div className="text-xs text-gray-500">
