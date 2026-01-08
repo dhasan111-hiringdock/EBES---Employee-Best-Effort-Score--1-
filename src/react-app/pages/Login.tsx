@@ -10,7 +10,10 @@ export default function Login() {
   const navigate = useNavigate();
   const [accountChoices, setAccountChoices] = useState<any[]>([]);
   const DEFAULT_API_BASE = 'https://ebes-app.dhasan111.workers.dev';
-  const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? DEFAULT_API_BASE;
+  const DEV_BASE = typeof window !== 'undefined' && window.location && window.location.origin.includes('localhost')
+    ? 'http://localhost:8787'
+    : undefined;
+  const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? DEV_BASE ?? DEFAULT_API_BASE;
 
   const getFinancialYearLabel = (dateStr: string) => {
     try {

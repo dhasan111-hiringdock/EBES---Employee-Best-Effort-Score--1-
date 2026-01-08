@@ -22,6 +22,7 @@ export default function RMSubmissions() {
   const [form, setForm] = useState<Record<string, any>>({});
   const [discardReason, setDiscardReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -80,8 +81,13 @@ export default function RMSubmissions() {
         }
       );
       if (!review.ok) {
-        const j = await review.json().catch(() => ({}));
-        throw new Error(j?.error || "Validation update failed");
+        const j = await review
+          .json()
+          .catch(async () => {
+            const t = await review.text().catch(() => "");
+            return t ? { error: t } : {};
+          });
+        throw new Error(j?.error || `Validation update failed (${review.status})`);
       }
       const send = await fetchWithAuth(
         `/api/rm/roles/${i.role_id}/candidates/${i.candidate_id}/send-to-am`,
@@ -93,6 +99,8 @@ export default function RMSubmissions() {
       }
       setItems((prev) => prev.filter((x) => keyOf(x) !== keyOf(i)));
       setExpandedKey(null);
+      setSuccess("Reviewed and sent to AM");
+      setTimeout(() => setSuccess(null), 3000);
     } catch (e: any) {
       alert(e?.message || "Failed to accept");
     } finally {
@@ -146,6 +154,14 @@ export default function RMSubmissions() {
 
   return (
     <div className="space-y-4">
+      {success && (
+        <div className="fixed top-4 right-4 z-50">
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-2 rounded-lg shadow">
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="text-sm font-medium">{success}</span>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-600">
           Showing {items.length} pending submissions

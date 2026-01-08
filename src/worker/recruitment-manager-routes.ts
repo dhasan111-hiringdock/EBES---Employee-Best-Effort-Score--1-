@@ -2437,7 +2437,7 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
   const candidateId = c.req.param("candidateId");
   const body = await c.req.json();
 
-  const role = await db.prepare("SELECT team_id FROM am_roles WHERE id = ?").bind(roleId).first();
+  const role = await db.prepare("SELECT id, client_id, team_id, account_manager_id FROM am_roles WHERE id = ?").bind(roleId).first();
   if (!role) return c.json({ error: "Role not found" }, 404);
 
   const access = await db
@@ -2447,7 +2447,7 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
   if (!access) return c.json({ error: "Forbidden" }, 403);
 
   const assoc = await db
-    .prepare("SELECT recruiter_user_id FROM candidate_role_associations WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0")
+    .prepare("SELECT recruiter_user_id, submission_date FROM candidate_role_associations WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0")
     .bind(roleId, candidateId)
     .first();
   if (!assoc) return c.json({ error: "Association not found" }, 404);
@@ -2463,41 +2463,108 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
     LIMIT 1
   `).bind(roleId, (assoc as any).recruiter_user_id).first();
 
-  if (!sub) return c.json({ error: "Submission not found" }, 404);
+  if (!sub) {
+    try {
+      const cand = await db.prepare("SELECT name FROM candidates WHERE id = ?").bind(candidateId).first();
+      const created = await db.prepare(`
+        INSERT INTO recruiter_submissions
+        (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, candidate_name, rm_validation_status, rm_rate_bill, rm_rate_pay, rm_location, rm_work_type, cv_match_percent, rm_notes, rm_reviewed_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'after_24h', ?, NULL, 'submission', NULL, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `).bind(
+        (assoc as any).recruiter_user_id,
+        (role as any).client_id,
+        (role as any).team_id,
+        (role as any).id,
+        (role as any).account_manager_id,
+        (rmUser as any).id,
+        (assoc as any).submission_date || new Date().toISOString().slice(0, 10),
+        (cand as any)?.name || null,
+        body.rm_validation_status || null,
+        (body.rm_payment != null ? Number(body.rm_payment) : (body.rm_rate_bill != null ? Number(body.rm_rate_bill) : null)),
+        body.rm_rate_pay != null ? Number(body.rm_rate_pay) : null,
+        body.rm_location || null,
+        (() => {
+          const wt = body.rm_work_type ? String(body.rm_work_type).toLowerCase() : null;
+          if (wt === 'sow') return 'SOW';
+          if (wt === 'payroll') return 'Payroll';
+          return null;
+        })(),
+        body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+        body.rm_notes || null
+      ).run();
+      const newId = created.meta.last_row_id;
+      const subObj = { id: newId, team_id: (role as any).team_id } as any;
+      let workType = body.rm_work_type || null;
+      if (workType) {
+        const wt = String(workType).toLowerCase();
+        if (wt === 'sow') workType = 'SOW';
+        else if (wt === 'payroll') workType = 'Payroll';
+        else workType = null;
+      }
+      await db.prepare(`
+        UPDATE recruiter_submissions SET
+          rm_validation_status = COALESCE(?, rm_validation_status),
+          rm_rate_bill = COALESCE(?, rm_rate_bill),
+          rm_rate_pay = COALESCE(?, rm_rate_pay),
+          rm_location = COALESCE(?, rm_location),
+          rm_work_type = COALESCE(?, rm_work_type),
+          cv_match_percent = COALESCE(?, cv_match_percent),
+          rm_notes = COALESCE(?, rm_notes),
+          rm_reviewed_at = COALESCE(?, CURRENT_TIMESTAMP),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).bind(
+        body.rm_validation_status || null,
+        (body.rm_payment != null ? Number(body.rm_payment) : (body.rm_rate_bill != null ? Number(body.rm_rate_bill) : null)),
+        body.rm_rate_pay != null ? Number(body.rm_rate_pay) : null,
+        body.rm_location || null,
+        workType,
+        body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+        body.rm_notes || null,
+        body.rm_review_date || null,
+        subObj.id
+      ).run();
+      return c.json({ success: true });
+    } catch (error: any) {
+      return c.json({ error: error?.message || "Failed to update validation (create path)" }, 500);
+    }
+  }
 
   let workType = body.rm_work_type || null;
   if (workType) {
     const wt = String(workType).toLowerCase();
-    if (wt === 'sow' || wt === 'payroll') {
-      workType = wt === 'sow' ? 'SOW' : 'Payroll';
-    } else {
-      return c.json({ error: "Invalid contract type: must be SOW or Payroll" }, 400);
-    }
+    if (wt === 'sow') workType = 'SOW';
+    else if (wt === 'payroll') workType = 'Payroll';
+    else workType = null;
   }
 
-  await db.prepare(`
-    UPDATE recruiter_submissions SET
-      rm_validation_status = COALESCE(?, rm_validation_status),
-      rm_rate_bill = COALESCE(?, rm_rate_bill),
-      rm_rate_pay = COALESCE(?, rm_rate_pay),
-      rm_location = COALESCE(?, rm_location),
-      rm_work_type = COALESCE(?, rm_work_type),
-      cv_match_percent = COALESCE(?, cv_match_percent),
-      rm_notes = COALESCE(?, rm_notes),
-      rm_reviewed_at = COALESCE(?, CURRENT_TIMESTAMP),
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).bind(
-    body.rm_validation_status || null,
-    (body.rm_payment != null ? body.rm_payment : body.rm_rate_bill) || null,
-    body.rm_rate_pay || null,
-    body.rm_location || null,
-    workType,
-    body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
-    body.rm_notes || null,
-    body.rm_review_date || null,
-    (sub as any).id
-  ).run();
+  try {
+    await db.prepare(`
+      UPDATE recruiter_submissions SET
+        rm_validation_status = COALESCE(?, rm_validation_status),
+        rm_rate_bill = COALESCE(?, rm_rate_bill),
+        rm_rate_pay = COALESCE(?, rm_rate_pay),
+        rm_location = COALESCE(?, rm_location),
+        rm_work_type = COALESCE(?, rm_work_type),
+        cv_match_percent = COALESCE(?, cv_match_percent),
+        rm_notes = COALESCE(?, rm_notes),
+        rm_reviewed_at = COALESCE(?, CURRENT_TIMESTAMP),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(
+      body.rm_validation_status || null,
+      (body.rm_payment != null ? Number(body.rm_payment) : (body.rm_rate_bill != null ? Number(body.rm_rate_bill) : null)),
+      body.rm_rate_pay != null ? Number(body.rm_rate_pay) : null,
+      body.rm_location || null,
+      workType,
+      body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+      body.rm_notes || null,
+      body.rm_review_date || null,
+      (sub as any).id
+    ).run();
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to update validation" }, 500);
+  }
 
   return c.json({ success: true });
 });
