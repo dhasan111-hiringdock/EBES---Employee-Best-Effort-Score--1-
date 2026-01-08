@@ -1,33 +1,23 @@
 import { useState, useEffect } from "react";
 import { FileText, Search, Filter, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
+ 
 
 export default function AMLedger() {
+  const [viewMode, setViewMode] = useState<'roles' | 'candidates'>('roles');
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('month');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [search, setSearch] = useState<string>('');
   const [eventType, setEventType] = useState<'all' | 'submitted' | 'client_submitted' | 'client_rejected' | 'interview' | 'deal' | 'discarded' | 'dropout'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_play' | 'positive' | 'negative'>('all');
+  const [roleStatusFilter, setRoleStatusFilter] = useState<'all' | 'active' | 'lost' | 'deal' | 'on_hold' | 'cancelled' | 'no_answer'>('all');
   const [loading, setLoading] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'excel' | 'pdf'>('csv');
   const [tableLoading, setTableLoading] = useState(false);
-  const [entries, setEntries] = useState<Array<{
-    event_date: string;
-    event_type: string;
-    candidate_name: string;
-    role_title: string;
-    role_code?: string;
-    client_name: string;
-    team_name: string;
-    submission_type?: string;
-    interview_level?: string;
-    cv_match_percent?: string;
-    notes?: string;
-  }>>([]);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100>(25);
-  const [total, setTotal] = useState(0);
+  const [roles, setRoles] = useState<any[]>([]);
+  const [candidates, setCandidates] = useState<any[]>([]);
+ 
 
   const exportLedger = async () => {
     try {
@@ -40,6 +30,7 @@ export default function AMLedger() {
       }
       if (eventType !== 'all') params.append('event_type', eventType);
       if (statusFilter !== 'all') params.append('status', statusFilter);
+      if (roleStatusFilter !== 'all') params.append('role_status', roleStatusFilter);
       if (search.trim()) params.append('search', search.trim());
       params.append('format', exportFormat);
       const res = await fetchWithAuth(`/api/am/ledger/export?${params.toString()}`);
@@ -67,40 +58,47 @@ export default function AMLedger() {
     }
   };
 
-  const fetchLedger = async (targetPage?: number, targetPageSize?: number) => {
+ 
+
+  const fetchRolesView = async () => {
     setTableLoading(true);
-    const params = new URLSearchParams();
-    params.append('date_range', dateRange);
-    if (dateRange === 'custom' && startDate && endDate) {
-      params.append('start_date', startDate);
-      params.append('end_date', endDate);
-    }
-    if (eventType !== 'all') params.append('event_type', eventType);
-    if (statusFilter !== 'all') params.append('status', statusFilter);
-    if (search.trim()) params.append('search', search.trim());
-    const pg = targetPage ?? page;
-    const ps = targetPageSize ?? pageSize;
-    params.append('page', String(pg));
-    params.append('page_size', String(ps));
-    const res = await fetchWithAuth(`/api/am/ledger?${params.toString()}`);
+    const res = await fetchWithAuth(`/api/am/roles`);
     if (res.ok) {
       const data = await res.json();
-      setEntries(data.events || []);
-      setTotal(Number(data.total || 0));
+      setRoles(data || []);
     } else {
-      setEntries([]);
-      setTotal(0);
+      setRoles([]);
+    }
+    setTableLoading(false);
+  };
+
+  const fetchCandidatesView = async () => {
+    setTableLoading(true);
+    const params = new URLSearchParams();
+    if (search.trim()) params.append('search', search.trim());
+    const res = await fetchWithAuth(`/api/am/candidates?${params.toString()}`);
+    if (res.ok) {
+      const data = await res.json();
+      setCandidates(data || []);
+    } else {
+      setCandidates([]);
     }
     setTableLoading(false);
   };
 
   useEffect(() => {
-    setPage(1);
-    fetchLedger(1, pageSize);
-  }, [dateRange, startDate, endDate, eventType, statusFilter, search]);
+    if (viewMode === 'roles') {
+      fetchRolesView();
+    } else {
+      fetchCandidatesView();
+    }
+  }, [viewMode]);
   useEffect(() => {
-    fetchLedger(page, pageSize);
-  }, [page, pageSize]);
+    if (viewMode === 'candidates') {
+      fetchCandidatesView();
+    }
+  }, [search]);
+ 
 
   return (
     <div className="space-y-6">
@@ -134,6 +132,15 @@ export default function AMLedger() {
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <select
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as any)}
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            title="View By"
+          >
+            <option value="roles">View: Roles</option>
+            <option value="candidates">View: Candidates</option>
+          </select>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
@@ -144,155 +151,202 @@ export default function AMLedger() {
               className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
           </div>
-          <select
-            value={eventType}
-            onChange={(e) => setEventType(e.target.value as any)}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            title="Event Type"
-          >
-            <option value="all">Event: All</option>
-            <option value="submitted">Submitted to AM</option>
-            <option value="client_submitted">Submitted to Client</option>
-            <option value="client_rejected">Client Rejected</option>
-            <option value="interview">Interview</option>
-            <option value="deal">Deal</option>
-            <option value="discarded">Discarded</option>
-            <option value="dropout">Dropout</option>
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            title="Status"
-          >
-            <option value="all">Status: All</option>
-            <option value="in_play">In Play</option>
-            <option value="positive">Positive</option>
-            <option value="negative">Negative</option>
-          </select>
-          <div className="grid grid-cols-3 gap-2">
-            <select
-              value={dateRange}
-              onChange={(e) => setDateRange(e.target.value as any)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-              title="Date Range"
-            >
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="custom">Custom</option>
-            </select>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-              disabled={dateRange !== 'custom'}
-            />
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-              disabled={dateRange !== 'custom'}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-slate-700">
-            <Filter className="w-4 h-4" />
-            <span className="text-sm">Filtered results</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="text-sm text-slate-600">Rows</label>
-            <select
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value) as any);
-                setPage(1);
-              }}
-              className="px-2 py-1 border border-slate-300 rounded text-sm"
-              title="Rows per page"
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </div>
-        </div>
-        <div className="p-4">
-          {tableLoading ? (
-            <div className="py-8 text-center text-slate-600">Loading...</div>
-          ) : entries.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-              <p className="text-slate-600 font-medium">No results</p>
-              <p className="text-sm text-slate-500 mt-1">Adjust filters and try again</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left">
-                    <th className="px-3 py-2 border-b w-32 sticky left-0 top-0 z-20 bg-white">Date</th>
-                    <th className="px-3 py-2 border-b w-40 sticky left-32 top-0 z-20 bg-white">Event</th>
-                    <th className="px-3 py-2 border-b">Candidate</th>
-                    <th className="px-3 py-2 border-b">Role</th>
-                    <th className="px-3 py-2 border-b">Client</th>
-                    <th className="px-3 py-2 border-b">Team</th>
-                    <th className="px-3 py-2 border-b">SubmissionType</th>
-                    <th className="px-3 py-2 border-b">InterviewLevel</th>
-                    <th className="px-3 py-2 border-b">CVMatchPercent</th>
-                    <th className="px-3 py-2 border-b">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((e, i) => (
-                    <tr key={i} className="border-b">
-                      <td className="px-3 py-2 w-32 sticky left-0 bg-white">{e.event_date}</td>
-                      <td className="px-3 py-2 w-40 sticky left-32 bg-white">{e.event_type}</td>
-                      <td className="px-3 py-2">{e.candidate_name}</td>
-                      <td className="px-3 py-2">{`${e.role_title}${e.role_code ? ` (${e.role_code})` : ''}`}</td>
-                      <td className="px-3 py-2">{e.client_name}</td>
-                      <td className="px-3 py-2">{e.team_name}</td>
-                      <td className="px-3 py-2">{e.submission_type || ''}</td>
-                      <td className="px-3 py-2">{e.interview_level || ''}</td>
-                      <td className="px-3 py-2">{e.cv_match_percent || ''}</td>
-                      <td className="px-3 py-2">{e.notes || ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="flex items-center justify-between mt-3">
-                <div className="text-sm text-slate-600">
-                  {entries.length === 0 ? "Showing 0 of 0" : `Showing ${(page - 1) * pageSize + 1}-${(page - 1) * pageSize + entries.length} of ${total}`}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    className="px-3 py-1 border rounded disabled:opacity-50"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                  >
-                    Prev
-                  </button>
-                  <span className="text-sm">{page}</span>
-                  <button
-                    className="px-3 py-1 border rounded disabled:opacity-50"
-                    onClick={() => setPage((p) => ((p * pageSize) < total ? p + 1 : p))}
-                    disabled={page * pageSize >= total}
-                  >
-                    Next
-                  </button>
-                </div>
+          {viewMode === 'roles' || viewMode === 'candidates' ? null : (
+            <>
+              <select
+                value={eventType}
+                onChange={(e) => setEventType(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Event Type"
+              >
+                <option value="all">Event: All</option>
+                <option value="submitted">Submitted to AM</option>
+                <option value="client_submitted">Submitted to Client</option>
+                <option value="client_rejected">Client Rejected</option>
+                <option value="interview">Interview</option>
+                <option value="deal">Deal</option>
+                <option value="discarded">Discarded</option>
+                <option value="dropout">Dropout</option>
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Status"
+              >
+                <option value="all">Status: All</option>
+                <option value="in_play">In Play</option>
+                <option value="positive">Positive</option>
+                <option value="negative">Negative</option>
+              </select>
+              <select
+                value={roleStatusFilter}
+                onChange={(e) => setRoleStatusFilter(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Role Status"
+              >
+                <option value="all">Role Status: All</option>
+                <option value="active">Active</option>
+                <option value="lost">Lost</option>
+                <option value="deal">Deal</option>
+                <option value="on_hold">On Hold</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="no_answer">No Answer</option>
+              </select>
+              <div className="grid grid-cols-3 gap-2">
+                <select
+                  value={dateRange}
+                  onChange={(e) => setDateRange(e.target.value as any)}
+                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  title="Date Range"
+                >
+                  <option value="today">Today</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  disabled={dateRange !== 'custom'}
+                />
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  disabled={dateRange !== 'custom'}
+                />
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
+
+      {viewMode === 'roles' ? (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+          <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-700">
+              <Filter className="w-4 h-4" />
+              <span className="text-sm">All roles</span>
+            </div>
+          </div>
+          <div className="p-4">
+            {tableLoading ? (
+              <div className="py-8 text-center text-slate-600">Loading...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left">
+                      <th className="px-3 py-2 border-b">Role</th>
+                      <th className="px-3 py-2 border-b">Status</th>
+                      <th className="px-3 py-2 border-b">Client</th>
+                      <th className="px-3 py-2 border-b">Teams</th>
+                      <th className="px-3 py-2 border-b">Pending</th>
+                      <th className="px-3 py-2 border-b">Submissions</th>
+                      <th className="px-3 py-2 border-b">Under Client Eval</th>
+                      <th className="px-3 py-2 border-b">Client Rejected</th>
+                      <th className="px-3 py-2 border-b">Interview 1</th>
+                      <th className="px-3 py-2 border-b">Interview 2</th>
+                      <th className="px-3 py-2 border-b">Interview 3</th>
+                      <th className="px-3 py-2 border-b">Total Interviews</th>
+                      <th className="px-3 py-2 border-b">Dropout</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roles
+                      .filter((r) => {
+                        const q = search.trim().toLowerCase();
+                        if (!q) return true;
+                        const s = `${r.title || ''} ${r.role_code || ''} ${r.client_name || ''} ${r.team_name || ''}`.toLowerCase();
+                        return s.includes(q);
+                      })
+                      .map((r, i) => {
+                        const teams = [
+                          r.team_name,
+                          ...(Array.isArray(r.additional_teams) ? r.additional_teams.map((t: any) => t.name || t.team_name) : [])
+                        ].filter(Boolean).join(", ");
+                        return (
+                          <tr key={i} className="border-b">
+                            <td className="px-3 py-2">{`${r.title || ''}${r.role_code ? ` (${r.role_code})` : ''}`}</td>
+                            <td className="px-3 py-2">{r.status || ''}</td>
+                            <td className="px-3 py-2">{r.client_name || ''}</td>
+                            <td className="px-3 py-2">{teams}</td>
+                            <td className="px-3 py-2">{r.pending_submissions ?? 0}</td>
+                            <td className="px-3 py-2">{r.total_submissions ?? 0}</td>
+                            <td className="px-3 py-2">{r.under_client_evaluation ?? 0}</td>
+                            <td className="px-3 py-2">{r.client_rejected ?? 0}</td>
+                            <td className="px-3 py-2">{r.interview_1_count ?? 0}</td>
+                            <td className="px-3 py-2">{r.interview_2_count ?? 0}</td>
+                            <td className="px-3 py-2">{r.interview_3_count ?? 0}</td>
+                            <td className="px-3 py-2">{r.total_interviews ?? 0}</td>
+                            <td className="px-3 py-2">
+                              {r.has_pending_dropout ? 'Pending' : r.has_dropout ? (r.dropout_decision || 'Completed') : 'None'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+          <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-slate-700">
+              <Filter className="w-4 h-4" />
+              <span className="text-sm">All candidates</span>
+            </div>
+          </div>
+          <div className="p-4">
+            {tableLoading ? (
+              <div className="py-8 text-center text-slate-600">Loading...</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left">
+                      <th className="px-3 py-2 border-b">Candidate</th>
+                      <th className="px-3 py-2 border-b">Email</th>
+                      <th className="px-3 py-2 border-b">Phone</th>
+                      <th className="px-3 py-2 border-b">Total Roles</th>
+                      <th className="px-3 py-2 border-b">In Play</th>
+                      <th className="px-3 py-2 border-b">RM Evaluation</th>
+                      <th className="px-3 py-2 border-b">Submitted</th>
+                      <th className="px-3 py-2 border-b">Client Submitted</th>
+                      <th className="px-3 py-2 border-b">Client Rejected</th>
+                      <th className="px-3 py-2 border-b">Deals</th>
+                      <th className="px-3 py-2 border-b">Last Activity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {candidates.map((c, i) => (
+                      <tr key={i} className="border-b">
+                        <td className="px-3 py-2">{`${c.candidate_name || ''}${c.candidate_code ? ` (${c.candidate_code})` : ''}`}</td>
+                        <td className="px-3 py-2">{c.email || ''}</td>
+                        <td className="px-3 py-2">{c.phone || ''}</td>
+                        <td className="px-3 py-2">{c.total_roles ?? 0}</td>
+                        <td className="px-3 py-2">{c.in_play_roles ?? 0}</td>
+                        <td className="px-3 py-2">{c.rm_evaluation ?? 0}</td>
+                        <td className="px-3 py-2">{c.submitted ?? 0}</td>
+                        <td className="px-3 py-2">{c.client_submitted ?? 0}</td>
+                        <td className="px-3 py-2">{c.client_rejected ?? 0}</td>
+                        <td className="px-3 py-2">{c.deals ?? 0}</td>
+                        <td className="px-3 py-2">{c.last_event_date || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

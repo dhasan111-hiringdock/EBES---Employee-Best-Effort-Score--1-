@@ -2005,6 +2005,7 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
     const statusFilterParam = c.req.query("status");
     const searchParam = c.req.query("search");
     const formatParam = c.req.query("format") || "csv";
+    const roleStatusParam = c.req.query("role_status");
     const todayStr = new Date().toISOString().slice(0, 10);
     let startDate = todayStr;
     let endDate = todayStr;
@@ -2027,6 +2028,8 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
     const eventType = eventTypeParam && allowedEventTypes.includes(eventTypeParam) ? eventTypeParam : null;
     const statusFilter = statusFilterParam && ["in_play", "positive", "negative"].includes(statusFilterParam) ? statusFilterParam : null;
     const search = searchParam ? String(searchParam).trim() : "";
+    const allowedRoleStatuses = ["active", "lost", "deal", "on_hold", "cancelled", "no_answer"];
+    const roleStatus = roleStatusParam && allowedRoleStatuses.includes(String(roleStatusParam)) ? String(roleStatusParam) : null;
     const craBaseParams: any[] = [(amUser as any).id];
     let craWhere = "r.account_manager_id = ? AND cra.is_discarded = 0";
     let craDateClause = " AND ((cra.status = 'submitted' AND DATE(cra.updated_at) BETWEEN ? AND ?) OR (cra.status IN ('client_submitted','client_rejected') AND DATE(cra.updated_at) BETWEEN ? AND ?))";
@@ -2053,6 +2056,8 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
               c.name as candidate_name,
               r.title as role_title,
               r.role_code as role_code,
+              r.status as role_status,
+              r.description as role_description,
               cl.name as client_name,
               t.name as team_name,
               NULL as submission_type,
@@ -2087,6 +2092,8 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
           c.name as candidate_name,
           r.title as role_title,
           r.role_code as role_code,
+          r.status as role_status,
+          r.description as role_description,
           cl.name as client_name,
           t.name as team_name,
           NULL as submission_type,
@@ -2127,6 +2134,8 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
           rs.candidate_name,
           ar.title as role_title,
           ar.role_code as role_code,
+          ar.status as role_status,
+          ar.description as role_description,
           cl.name as client_name,
           t.name as team_name,
           rs.submission_type,
@@ -2160,6 +2169,8 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
           NULL as candidate_name,
           ar.title as role_title,
           ar.role_code as role_code,
+          ar.status as role_status,
+          ar.description as role_description,
           cl.name as client_name,
           t.name as team_name,
           NULL as submission_type,
@@ -2187,6 +2198,8 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
       candidate_name: (r as any).candidate_name || "",
       role_title: (r as any).role_title || "",
       role_code: (r as any).role_code || "",
+      role_status: (r as any).role_status || "",
+      role_description: (r as any).role_description || "",
       client_name: (r as any).client_name || "",
       team_name: (r as any).team_name || "",
       submission_type: (r as any).submission_type || "",
@@ -2196,6 +2209,9 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
     }));
     if (eventType) {
       allEvents = allEvents.filter((e) => e.event_type === eventType);
+    }
+    if (roleStatus) {
+      allEvents = allEvents.filter((e) => e.role_status === roleStatus);
     }
     if (statusFilter === "in_play") {
       allEvents = allEvents.filter((e) => e.event_type === "submitted" || e.event_type === "interview");
@@ -2209,12 +2225,13 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
       const bd = new Date(b.event_date).getTime();
       return bd - ad;
     });
-    const headers = ["Date", "Event", "Candidate", "Role", "Client", "Team", "SubmissionType", "InterviewLevel", "CVMatchPercent", "Notes"];
+    const headers = ["Date", "Event", "Candidate", "Role", "RoleStatus", "Client", "Team", "SubmissionType", "InterviewLevel", "CVMatchPercent", "Notes"];
     const rows = allEvents.map((e) => [
       e.event_date || "",
       e.event_type || "",
       (e.candidate_name || "").replace(/,/g, " "),
       ((e.role_title || "") + (e.role_code ? ` (${e.role_code})` : "")).replace(/,/g, " "),
+      (e.role_status || "").replace(/,/g, " "),
       (e.client_name || "").replace(/,/g, " "),
       (e.team_name || "").replace(/,/g, " "),
       e.submission_type || "",
@@ -2241,6 +2258,7 @@ app.get("/api/am/ledger/export", amOnly, async (c) => {
             e.event_type || "",
             e.candidate_name || "",
             ((e.role_title || "") + (e.role_code ? ` (${e.role_code})` : "")) || "",
+            e.role_status || "",
             e.client_name || "",
             e.team_name || "",
             e.submission_type || "",
@@ -2341,6 +2359,8 @@ app.get("/api/am/ledger", amOnly, async (c) => {
               c.name as candidate_name,
               r.title as role_title,
               r.role_code as role_code,
+              r.status as role_status,
+              r.description as role_description,
               cl.name as client_name,
               t.name as team_name,
               NULL as submission_type,
@@ -2375,6 +2395,8 @@ app.get("/api/am/ledger", amOnly, async (c) => {
           c.name as candidate_name,
           r.title as role_title,
           r.role_code as role_code,
+          r.status as role_status,
+          r.description as role_description,
           cl.name as client_name,
           t.name as team_name,
           NULL as submission_type,
@@ -2415,6 +2437,8 @@ app.get("/api/am/ledger", amOnly, async (c) => {
           rs.candidate_name,
           ar.title as role_title,
           ar.role_code as role_code,
+          ar.status as role_status,
+          ar.description as role_description,
           cl.name as client_name,
           t.name as team_name,
           rs.submission_type,
@@ -2448,6 +2472,8 @@ app.get("/api/am/ledger", amOnly, async (c) => {
           NULL as candidate_name,
           ar.title as role_title,
           ar.role_code as role_code,
+          ar.status as role_status,
+          ar.description as role_description,
           cl.name as client_name,
           t.name as team_name,
           NULL as submission_type,
@@ -2475,6 +2501,8 @@ app.get("/api/am/ledger", amOnly, async (c) => {
       candidate_name: (r as any).candidate_name || "",
       role_title: (r as any).role_title || "",
       role_code: (r as any).role_code || "",
+      role_status: (r as any).role_status || "",
+      role_description: (r as any).role_description || "",
       client_name: (r as any).client_name || "",
       team_name: (r as any).team_name || "",
       submission_type: (r as any).submission_type || "",
@@ -2482,8 +2510,14 @@ app.get("/api/am/ledger", amOnly, async (c) => {
       cv_match_percent: (r as any).cv_match_percent != null ? String((r as any).cv_match_percent) : "",
       notes: (r as any).notes || ""
     }));
+    const roleStatusParam = c.req.query("role_status");
+    const allowedRoleStatuses = ["active", "lost", "deal", "on_hold", "cancelled", "no_answer"];
+    const roleStatus = roleStatusParam && allowedRoleStatuses.includes(String(roleStatusParam)) ? String(roleStatusParam) : null;
     if (eventType) {
       allEvents = allEvents.filter((e) => e.event_type === eventType);
+    }
+    if (roleStatus) {
+      allEvents = allEvents.filter((e) => e.role_status === roleStatus);
     }
     if (statusFilter === "in_play") {
       allEvents = allEvents.filter((e) => e.event_type === "submitted" || e.event_type === "interview");
@@ -2510,6 +2544,53 @@ app.get("/api/am/ledger", amOnly, async (c) => {
   } catch (error: any) {
     console.error("AM Ledger read failed:", error);
     return c.json({ error: "Failed to read AM ledger" }, 500);
+  }
+});
+
+// AM candidates summary (aggregate by candidate across AM's roles)
+app.get("/api/am/candidates", amOnly, async (c) => {
+  try {
+    const db = c.env.DB;
+    const amUser = c.get("amUser");
+    const searchParam = c.req.query("search");
+    const search = searchParam ? `%${String(searchParam).trim()}%` : null;
+    let where = "r.account_manager_id = ?";
+    const params: any[] = [(amUser as any).id];
+    if (search) {
+      where += " AND (c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)";
+      params.push(search, search, search);
+    }
+    const rows = await db
+      .prepare(
+        `
+        SELECT 
+          c.id as candidate_id,
+          c.name as candidate_name,
+          c.candidate_code,
+          c.email,
+          c.phone,
+          COUNT(DISTINCT cra.role_id) as total_roles,
+          SUM(CASE WHEN cra.is_discarded = 0 THEN 1 ELSE 0 END) as in_play_roles,
+          SUM(CASE WHEN cra.status = 'rm_evaluation' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as rm_evaluation,
+          SUM(CASE WHEN cra.status = 'submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as submitted,
+          SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_submitted,
+          SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected,
+          SUM(CASE WHEN cra.status = 'deal' THEN 1 ELSE 0 END) as deals,
+          DATE(MAX(COALESCE(cra.updated_at, cra.submission_date, cra.discarded_at))) as last_event_date
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        WHERE ${where}
+        GROUP BY c.id, c.name, c.candidate_code, c.email, c.phone
+        ORDER BY last_event_date DESC
+        `
+      )
+      .bind(...params)
+      .all();
+    return c.json(rows.results || []);
+  } catch (error) {
+    console.error("Error fetching AM candidates:", error);
+    return c.json({ error: "Failed to fetch candidates" }, 500);
   }
 });
 

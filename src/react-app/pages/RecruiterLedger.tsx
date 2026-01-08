@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { FileText, Search, Filter, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import LedgerTable from "@/react-app/components/shared/LedgerTable";
 
 export default function RecruiterLedger() {
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'custom'>('month');
@@ -236,38 +237,7 @@ export default function RecruiterLedger() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left">
-                    <th className="px-3 py-2 border-b w-32 sticky left-0 top-0 z-20 bg-white">Date</th>
-                    <th className="px-3 py-2 border-b w-40 sticky left-32 top-0 z-20 bg-white">Event</th>
-                    <th className="px-3 py-2 border-b">Candidate</th>
-                    <th className="px-3 py-2 border-b">Role</th>
-                    <th className="px-3 py-2 border-b">Client</th>
-                    <th className="px-3 py-2 border-b">Team</th>
-                    <th className="px-3 py-2 border-b">SubmissionType</th>
-                    <th className="px-3 py-2 border-b">InterviewLevel</th>
-                    <th className="px-3 py-2 border-b">CVMatchPercent</th>
-                    <th className="px-3 py-2 border-b">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((e, i) => (
-                    <tr key={i} className="border-b">
-                      <td className="px-3 py-2 w-32 sticky left-0 bg-white">{e.event_date}</td>
-                      <td className="px-3 py-2 w-40 sticky left-32 bg-white">{e.event_type}</td>
-                      <td className="px-3 py-2">{e.candidate_name}</td>
-                      <td className="px-3 py-2">{`${e.role_title}${e.role_code ? ` (${e.role_code})` : ''}`}</td>
-                      <td className="px-3 py-2">{e.client_name}</td>
-                      <td className="px-3 py-2">{e.team_name}</td>
-                      <td className="px-3 py-2">{e.submission_type || ''}</td>
-                      <td className="px-3 py-2">{e.interview_level || ''}</td>
-                      <td className="px-3 py-2">{e.cv_match_percent || ''}</td>
-                      <td className="px-3 py-2">{e.notes || ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <LedgerTable entries={entries} />
               <div className="flex items-center justify-between mt-3">
                 <div className="text-sm text-slate-600">
                   {entries.length === 0 ? "Showing 0 of 0" : `Showing ${(page - 1) * pageSize + 1}-${(page - 1) * pageSize + entries.length} of ${total}`}
