@@ -89,3 +89,81 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
 
   return fetch(fullUrl, fetchOptions);
 }
+
+export async function rmReviewSubmission(submissionId: number, body: any): Promise<Response> {
+  return fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function rmReviewByRoleCandidate(roleId: number, candidateId: number, body: any): Promise<Response> {
+  return fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/review`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function rmSendCandidateToAM(roleId: number, candidateId: number): Promise<Response> {
+  return fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/send-to-am`, {
+    method: 'POST',
+  });
+}
+
+export async function rmDiscardCandidate(roleId: number, candidateId: number, reason?: string): Promise<Response> {
+  return fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function amSubmitCandidateToClient(roleId: number, candidateId: number): Promise<Response> {
+  return fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/submit-to-client`, {
+    method: 'POST',
+  });
+}
+
+export async function amClientRejectCandidate(roleId: number, candidateId: number): Promise<Response> {
+  return fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/client-reject`, {
+    method: 'POST',
+  });
+}
+
+export async function amMarkDeal(roleId: number, candidateId: number): Promise<Response> {
+  return fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/deal`, {
+    method: 'POST',
+  });
+}
+
+export async function amDiscardCandidate(roleId: number, candidateId: number, reason?: string): Promise<Response> {
+  return fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function amReviewSubmission(submissionId: number, body: any): Promise<Response> {
+  return fetchWithAuth(`/api/am/submissions/${submissionId}/review`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function amPullOutCandidate(roleId: number, candidateId: number): Promise<Response> {
+  return fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/pull-out`, {
+    method: 'POST',
+  });
+}
+
+export async function getRmRoleSubmissions(roleId: number): Promise<Response> {
+  return fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
+}
+
+export async function getAmRoleSubmissions(roleId: number): Promise<Response> {
+  return fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+}

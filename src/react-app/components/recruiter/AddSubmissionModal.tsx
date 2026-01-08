@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { X, Briefcase, Calendar, FileText, CheckCircle, Users, ArrowRight, Check, Plus, Send } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
@@ -100,27 +100,24 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
     return () => clearTimeout(debounceTimer);
   }, [candidateName]);
 
-  useEffect(() => {
-    if (client) {
-      fetchRoles();
-    }
-  }, [client]);
-
-  const fetchRoles = async () => {
+  const fetchRoles = useCallback(async () => {
     if (!client) return;
-    
     try {
       const response = await fetchWithAuth(`/api/recruiter/roles/${client.id}/${client.team_id}`);
       if (response.ok) {
         const data = await response.json();
         setRoles(data);
       }
-    } catch (error) {
-      console.error("Failed to fetch roles:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [client]);
+
+  useEffect(() => {
+    if (client) {
+      fetchRoles();
+    }
+  }, [client, fetchRoles]);
 
   const handleRoleSelect = (role: Role) => {
     setSelectedRole(role);

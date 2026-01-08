@@ -23,3 +23,5 @@ createRoot(document.getElementById("root")!).render(
     <AppWithFonts />
   </StrictMode>
 );
+
+export default AppWithFonts;

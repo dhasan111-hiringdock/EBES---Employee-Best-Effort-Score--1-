@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X, Briefcase, Building2, Users, User } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
 
@@ -63,6 +63,32 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
     recruiter_ids: [] as number[]
   });
 
+  const fetchRoleTeams = useCallback(async () => {
+    if (!role) return;
+    try {
+      const response = await fetchWithAuth(`/api/rm/roles/${role.id}/teams`);
+      if (response.ok) {
+        const roleTeams = await response.json();
+        const teamIds = roleTeams.map((t: Team) => t.id);
+        setAssignedTeamIds(teamIds);
+        setFormData(prev => ({ ...prev, team_ids: teamIds }));
+      }
+    } catch {}
+  }, [role]);
+
+  const fetchAssignedRecruiters = useCallback(async () => {
+    if (!role) return;
+    try {
+      const response = await fetchWithAuth(`/api/rm/roles/${role.id}/assigned-recruiters`);
+      if (response.ok) {
+        const assignedRecruiters = await response.json();
+        const recruiterIds = assignedRecruiters.map((r: Recruiter) => r.id);
+        setAssignedRecruiterIds(recruiterIds);
+        setFormData(prev => ({ ...prev, recruiter_ids: recruiterIds }));
+      }
+    } catch {}
+  }, [role]);
+
   useEffect(() => {
     if (isOpen && role) {
       fetchInitialData();
@@ -70,14 +96,14 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
       fetchAssignedRecruiters();
       setFormData({
         client_id: String(role.client_id),
-        team_ids: [], // Will be set after fetching role teams
+        team_ids: [],
         title: role.title,
         description: role.description || '',
         account_manager_id: String(role.account_manager_id),
-        recruiter_ids: [] // Will be set after fetching assigned recruiters
+        recruiter_ids: []
       });
     }
-  }, [isOpen, role]);
+  }, [isOpen, role, fetchRoleTeams, fetchAssignedRecruiters]);
 
   const fetchInitialData = async () => {
     try {
@@ -97,37 +123,7 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
     }
   };
 
-  const fetchRoleTeams = async () => {
-    if (!role) return;
-    
-    try {
-      const response = await fetchWithAuth(`/api/rm/roles/${role.id}/teams`);
-      if (response.ok) {
-        const roleTeams = await response.json();
-        const teamIds = roleTeams.map((t: Team) => t.id);
-        setAssignedTeamIds(teamIds);
-        setFormData(prev => ({ ...prev, team_ids: teamIds }));
-      }
-    } catch (error) {
-      console.error('Failed to fetch role teams:', error);
-    }
-  };
-
-  const fetchAssignedRecruiters = async () => {
-    if (!role) return;
-    
-    try {
-      const response = await fetchWithAuth(`/api/rm/roles/${role.id}/assigned-recruiters`);
-      if (response.ok) {
-        const assignedRecruiters = await response.json();
-        const recruiterIds = assignedRecruiters.map((r: Recruiter) => r.id);
-        setAssignedRecruiterIds(recruiterIds);
-        setFormData(prev => ({ ...prev, recruiter_ids: recruiterIds }));
-      }
-    } catch (error) {
-      console.error('Failed to fetch assigned recruiters:', error);
-    }
-  };
+  
 
   const handleTeamToggle = (teamId: number) => {
     setFormData(prev => ({

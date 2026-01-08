@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, Target, Award, BarChart3, Users, Filter, X, Clock, HelpCircle, Lightbulb, CheckCircle, Download } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
 import { fetchWithAuth } from "@/react-app/utils/api";
@@ -101,12 +101,48 @@ export default function RecruiterAnalytics() {
     } catch {}
   }, [selectedClient, selectedTeam, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate, ebesDateFilter, ebesCustomStart, ebesCustomEnd]);
 
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (selectedClient) params.append('client_id', selectedClient);
+      if (selectedTeam) params.append('team_id', selectedTeam);
+      if (selectedRole) params.append('role_id', selectedRole);
+      if (selectedEntryType) params.append('entry_type', selectedEntryType);
+      if (dateRange) params.append('date_range', dateRange);
+      if (dateRange === 'custom' && customStartDate && customEndDate) {
+        params.append('start_date', customStartDate);
+        params.append('end_date', customEndDate);
+      }
+      const response = await fetchWithAuth(`/api/recruiter/analytics?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setAnalytics(data);
+      }
+    } catch {}
+  }, [selectedClient, selectedTeam, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate]);
+
+  const fetchEBESScore = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      params.append('filter', ebesDateFilter);
+      if (ebesDateFilter === 'custom' && ebesCustomStart && ebesCustomEnd) {
+        params.append('start_date', ebesCustomStart);
+        params.append('end_date', ebesCustomEnd);
+      }
+      const response = await fetchWithAuth(`/api/recruiter/ebes-score?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setEbesData(data);
+      }
+    } catch {}
+  }, [ebesDateFilter, ebesCustomStart, ebesCustomEnd]);
+
   useEffect(() => {
     if (!loading) {
       fetchAnalytics();
       fetchEBESScore();
     }
-  }, [loading, selectedClient, selectedTeam, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate, ebesDateFilter, ebesCustomStart, ebesCustomEnd]);
+  }, [loading, selectedClient, selectedTeam, selectedRole, selectedEntryType, dateRange, customStartDate, customEndDate, ebesDateFilter, ebesCustomStart, ebesCustomEnd, fetchAnalytics, fetchEBESScore]);
 
   const fetchInitialData = async () => {
     try {
@@ -143,28 +179,6 @@ export default function RecruiterAnalytics() {
     }
   };
 
-  const fetchAnalytics = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (selectedClient) params.append('client_id', selectedClient);
-      if (selectedTeam) params.append('team_id', selectedTeam);
-      if (selectedRole) params.append('role_id', selectedRole);
-      if (selectedEntryType) params.append('entry_type', selectedEntryType);
-      if (dateRange) params.append('date_range', dateRange);
-      if (dateRange === 'custom' && customStartDate && customEndDate) {
-        params.append('start_date', customStartDate);
-        params.append('end_date', customEndDate);
-      }
-
-      const response = await fetchWithAuth(`/api/recruiter/analytics?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setAnalytics(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch analytics:', error);
-    }
-  };
 
   const handleReportDownload = async (filters: ReportFilters, format: 'csv' | 'excel' | 'pdf') => {
     const selectedFields = (filters.fields && filters.fields.length > 0) ? filters.fields : [
@@ -355,24 +369,7 @@ export default function RecruiterAnalytics() {
     }
   };
 
-  const fetchEBESScore = async () => {
-    try {
-      const params = new URLSearchParams();
-      params.append('filter', ebesDateFilter);
-      if (ebesDateFilter === 'custom' && ebesCustomStart && ebesCustomEnd) {
-        params.append('start_date', ebesCustomStart);
-        params.append('end_date', ebesCustomEnd);
-      }
-
-      const response = await fetchWithAuth(`/api/recruiter/ebes-score?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setEbesData(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch EBES score:', error);
-    }
-  };
+  
 
   const clearFilters = () => {
     setSelectedClient('');

@@ -6,7 +6,7 @@ import DeleteRoleModal from "./DeleteRoleModal";
 import ChangeStatusModal from "./ChangeStatusModal";
 import AddInterviewModal from "./AddInterviewModal";
 import RoleCard from "./RoleCard";
-import { fetchWithAuth } from "@/react-app/utils/api";
+import { fetchWithAuth, amDiscardCandidate, amSubmitCandidateToClient, amClientRejectCandidate, amPullOutCandidate, amMarkDeal, amReviewSubmission } from "@/react-app/utils/api";
 
 interface Role {
   id: number;
@@ -194,10 +194,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   };
 
   const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/discard`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const res = await amDiscardCandidate(roleId, candidateId, undefined);
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
     }
@@ -205,19 +202,14 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
 
   const saveNotes = async (submissionId?: number) => {
     if (!submissionId) return;
-    const res = await fetchWithAuth(`/api/am/submissions/${submissionId}/review`, {
-      method: 'PUT',
-      body: JSON.stringify({ am_notes: notesEdits[submissionId] || '' }),
-    });
+    const res = await amReviewSubmission(submissionId, { am_notes: notesEdits[submissionId] || '' });
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
     }
   };
 
   const submitToClient = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/submit-to-client`, {
-      method: 'POST',
-    });
+    const res = await amSubmitCandidateToClient(roleId, candidateId);
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
       await fetchRoles();
@@ -225,9 +217,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   };
 
   const clientReject = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/client-reject`, {
-      method: 'POST',
-    });
+    const res = await amClientRejectCandidate(roleId, candidateId);
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
       await fetchRoles();
@@ -235,9 +225,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   };
 
   const pullOut = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/pull-out`, {
-      method: 'POST',
-    });
+    const res = await amPullOutCandidate(roleId, candidateId);
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
       await fetchRoles();
@@ -245,9 +233,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   };
 
   const markDeal = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/deal`, {
-      method: 'POST',
-    });
+    const res = await amMarkDeal(roleId, candidateId);
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
       await fetchRoles();

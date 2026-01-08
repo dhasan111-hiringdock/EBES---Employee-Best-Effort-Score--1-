@@ -1859,6 +1859,7 @@ app.get("/api/am/role-submissions/:roleId", amOnly, async (c) => {
       cra.is_discarded,
       cra.discarded_at,
       cra.discarded_reason,
+      cra.updated_at,
       u.name as recruiter_name,
       u.user_code as recruiter_code,
       rs.id as submission_id,
@@ -1884,8 +1885,8 @@ app.get("/api/am/role-submissions/:roleId", amOnly, async (c) => {
 
   const results = rows.results || [];
   return c.json({
-    under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1),
-    rejected: results.filter((r: any) => (r as any).is_discarded === 1),
+    under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && (r as any).association_status !== 'client_rejected'),
+    rejected: results.filter((r: any) => (r as any).is_discarded === 1 || (r as any).association_status === 'client_rejected'),
   });
 });
 

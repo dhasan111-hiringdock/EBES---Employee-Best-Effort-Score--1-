@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Users, Plus, Trash2, UserCheck, X, Edit } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
 
@@ -28,18 +28,7 @@ export default function RMTeamManagement() {
   const [editingRecruiter, setEditingRecruiter] = useState<Recruiter | null>(null);
   const [newTeamId, setNewTeamId] = useState<string>('');
 
-  useEffect(() => {
-    fetchTeams();
-  }, []);
-
-  useEffect(() => {
-    if (selectedTeam) {
-      fetchTeamRecruiters();
-      fetchAvailableRecruiters();
-    }
-  }, [selectedTeam]);
-
-  const fetchTeams = async () => {
+  const fetchTeams = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetchWithAuth('/api/rm/teams');
@@ -50,40 +39,41 @@ export default function RMTeamManagement() {
           setSelectedTeam(data[0]);
         }
       }
-    } catch (error) {
-      console.error('Failed to fetch teams:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedTeam]);
 
-  const fetchTeamRecruiters = async () => {
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
+
+  const fetchTeamRecruiters = useCallback(async () => {
     if (!selectedTeam) return;
-
-    try {
-      const response = await fetchWithAuth(`/api/rm/team-recruiters/${selectedTeam.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setTeamRecruiters(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch team recruiters:', error);
+    const response = await fetchWithAuth(`/api/rm/team-recruiters/${selectedTeam.id}`);
+    if (response.ok) {
+      const data = await response.json();
+      setTeamRecruiters(data);
     }
-  };
+  }, [selectedTeam]);
 
-  const fetchAvailableRecruiters = async () => {
+  const fetchAvailableRecruiters = useCallback(async () => {
     if (!selectedTeam) return;
-
-    try {
-      const response = await fetchWithAuth(`/api/rm/available-recruiters?team_id=${selectedTeam.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableRecruiters(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch available recruiters:', error);
+    const response = await fetchWithAuth(`/api/rm/available-recruiters?team_id=${selectedTeam.id}`);
+    if (response.ok) {
+      const data = await response.json();
+      setAvailableRecruiters(data);
     }
-  };
+  }, [selectedTeam]);
+
+  useEffect(() => {
+    if (selectedTeam) {
+      fetchTeamRecruiters();
+      fetchAvailableRecruiters();
+    }
+  }, [selectedTeam, fetchTeamRecruiters, fetchAvailableRecruiters]);
+
+  
 
   const handleAddRecruiter = async () => {
     if (!selectedRecruiter || !selectedTeam) return;

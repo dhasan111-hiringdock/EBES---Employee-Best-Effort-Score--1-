@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Download } from "lucide-react";
-import { fetchWithAuth } from "@/react-app/utils/api";
+import { fetchWithAuth, amSubmitCandidateToClient, amClientRejectCandidate, amDiscardCandidate, getAmRoleSubmissions, amMarkDeal } from "@/react-app/utils/api";
 import { useLocation } from "react-router";
 
 interface Role {
@@ -66,7 +66,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   };
 
   const statusChipLabel = (row: RoleSubmission) => {
-    if (row.is_discarded === 1) return "Discarded";
+    if (row.is_discarded === 1) return "Rejected";
     if (row.association_status === "client_submitted") return "Submitted to Client";
     if (row.association_status === "client_rejected") return "Client Rejected";
     if (row.association_status === "deal") return "Deal";
@@ -113,9 +113,12 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
     let discarded = 0;
     let clientRejected = 0;
     for (const roleId of Object.keys(dataByRole)) {
-      submittedToClient += (dataByRole[Number(roleId)].under_consideration || []).filter((r) => r.association_status === 'client_submitted' && r.is_discarded !== 1).length;
-      clientRejected += (dataByRole[Number(roleId)].under_consideration || []).filter((r) => r.association_status === 'client_rejected' && r.is_discarded !== 1).length;
-      discarded += (dataByRole[Number(roleId)].rejected || []).length;
+      const under = dataByRole[Number(roleId)].under_consideration || [];
+      const rej = dataByRole[Number(roleId)].rejected || [];
+      submittedToClient += under.filter((r) => r.association_status === 'client_submitted' && r.is_discarded !== 1).length;
+      clientRejected += under.filter((r) => r.association_status === 'client_rejected' && r.is_discarded !== 1).length;
+      clientRejected += rej.filter((r) => r.association_status === 'client_rejected' && r.is_discarded !== 1).length;
+      discarded += rej.filter((r) => r.is_discarded === 1).length;
     }
     return { submittedToClient, clientRejected, discarded };
   }, [dataByRole]);
@@ -176,12 +179,9 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   };
 
   const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/discard`, {
-      method: "POST",
-      body: JSON.stringify({ reason: "Discarded via Pipe" }),
-    });
+    const res = await amDiscardCandidate(roleId, candidateId, "Discarded via Pipe");
     if (res.ok) {
-      const r = await fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+      const r = await getAmRoleSubmissions(roleId);
       if (r.ok) {
         const payload = await r.json();
         setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
@@ -190,11 +190,9 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   };
 
   const submitToClient = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/submit-to-client`, {
-      method: "POST",
-    });
+    const res = await amSubmitCandidateToClient(roleId, candidateId);
     if (res.ok) {
-      const r = await fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+      const r = await getAmRoleSubmissions(roleId);
       if (r.ok) {
         const payload = await r.json();
         setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
@@ -203,11 +201,9 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   };
 
   const clientReject = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/client-reject`, {
-      method: "POST",
-    });
+    const res = await amClientRejectCandidate(roleId, candidateId);
     if (res.ok) {
-      const r = await fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+      const r = await getAmRoleSubmissions(roleId);
       if (r.ok) {
         const payload = await r.json();
         setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
@@ -216,11 +212,9 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   };
 
   const markDeal = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/am/roles/${roleId}/candidates/${candidateId}/deal`, {
-      method: "POST",
-    });
+    const res = await amMarkDeal(roleId, candidateId);
     if (res.ok) {
-      const r = await fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+      const r = await getAmRoleSubmissions(roleId);
       if (r.ok) {
         const payload = await r.json();
         setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
@@ -291,29 +285,29 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
-          <CheckCircle className="w-6 h-6 text-green-600" />
-          <div>
-            <p className="text-sm text-green-700 font-semibold">Submitted to Client</p>
-            <p className="text-2xl font-bold text-green-700">{totals.submittedToClient}</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+            <CheckCircle className="w-6 h-6 text-green-600" />
+            <div>
+              <p className="text-sm text-green-700 font-semibold">Submitted to Client</p>
+              <p className="text-2xl font-bold text-green-700">{totals.submittedToClient}</p>
+            </div>
+          </div>
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 flex items-center gap-3">
+            <XCircle className="w-6 h-6 text-gray-700" />
+            <div>
+              <p className="text-sm text-gray-700 font-semibold">Client Rejected</p>
+              <p className="text-2xl font-bold text-gray-900">{totals.clientRejected}</p>
+            </div>
+          </div>
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+            <XCircle className="w-6 h-6 text-red-600" />
+            <div>
+              <p className="text-sm text-red-700 font-semibold">Rejected</p>
+              <p className="text-2xl font-bold text-red-700">{totals.discarded}</p>
+            </div>
           </div>
         </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 flex items-center gap-3">
-          <XCircle className="w-6 h-6 text-gray-700" />
-          <div>
-            <p className="text-sm text-gray-700 font-semibold">Client Rejected</p>
-            <p className="text-2xl font-bold text-gray-900">{totals.clientRejected}</p>
-          </div>
-        </div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-          <XCircle className="w-6 h-6 text-red-600" />
-          <div>
-            <p className="text-sm text-red-700 font-semibold">Discarded</p>
-            <p className="text-2xl font-bold text-red-700">{totals.discarded}</p>
-          </div>
-        </div>
-      </div>
 
       {loading ? (
         <div className="flex items-center justify-center h-64">
@@ -339,7 +333,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                       In Pipe: {bucket.under_consideration.length}
                     </span>
                     <span className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-1">
-                      Discarded: {bucket.rejected.length}
+                      Rejected: {bucket.rejected.length}
                     </span>
                     <button
                       onClick={() => exportRoleRows(role.id, role.role_code)}

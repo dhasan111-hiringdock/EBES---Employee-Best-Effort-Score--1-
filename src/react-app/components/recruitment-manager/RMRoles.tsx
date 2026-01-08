@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router';
 import { 
   Search, 
@@ -18,7 +18,7 @@ import {
   Edit,
   UserPlus
 } from 'lucide-react';
-import { fetchWithAuth } from '@/react-app/utils/api';
+import { fetchWithAuth, rmDiscardCandidate, rmSendCandidateToAM, rmReviewSubmission, rmReviewByRoleCandidate } from '@/react-app/utils/api';
 import CreateRoleModal from './CreateRoleModal';
 import EditRoleModal from './EditRoleModal';
 import AssignRecruiterModal from './AssignRecruiterModal';
@@ -170,9 +170,30 @@ export default function RMRoles() {
     }
   }, [location.search, roles, activeTab]);
 
+  const fetchRoles = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      
+      params.append('status', activeTab);
+      if (clientFilter) params.append('client_id', clientFilter);
+      if (teamFilter) params.append('team_id', teamFilter);
+
+      const response = await fetchWithAuth(`/api/rm/roles?${params.toString()}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setRoles(data);
+      }
+    } catch (error) {
+    } finally {
+      setLoading(false);
+    }
+  }, [activeTab, clientFilter, teamFilter]);
+
   useEffect(() => {
     fetchRoles();
-  }, [activeTab, clientFilter, teamFilter]);
+  }, [fetchRoles]);
 
   useEffect(() => {
     if (selectedRole) {
@@ -198,27 +219,7 @@ export default function RMRoles() {
     }
   };
 
-  const fetchRoles = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      
-      params.append('status', activeTab);
-      if (clientFilter) params.append('client_id', clientFilter);
-      if (teamFilter) params.append('team_id', teamFilter);
-
-      const response = await fetchWithAuth(`/api/rm/roles?${params.toString()}`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        setRoles(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch roles:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  
 
   const filteredRoles = roles.filter(role => {
     const matchesSearch = 
@@ -333,15 +334,9 @@ export default function RMRoles() {
     const payload = key != null ? (reviewEdits[key] || {}) : {};
     let res: Response | null = null;
     if (submissionId) {
-      res = await fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
+      res = await rmReviewSubmission(submissionId, payload);
     } else if (roleId && candidateId) {
-      res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/review`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
+      res = await rmReviewByRoleCandidate(roleId, candidateId, payload);
     }
     if (res && res.ok && selectedRole) {
       await loadRoleSubmissions(selectedRole.id);
@@ -356,10 +351,7 @@ export default function RMRoles() {
   };
 
   const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/discard`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const res = await rmDiscardCandidate(roleId, candidateId, undefined);
     if (res.ok && selectedRole) {
       await loadRoleSubmissions(selectedRole.id);
     }
@@ -367,10 +359,7 @@ export default function RMRoles() {
  
   const sendToAM = async (roleId: number, candidateId: number, submissionId?: number, associationId?: number) => {
     await saveReview(submissionId, roleId, candidateId, associationId);
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/send-to-am`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    const res = await rmSendCandidateToAM(roleId, candidateId);
     if (res.ok && selectedRole) {
       await loadRoleSubmissions(selectedRole.id);
     } else {
@@ -1472,11 +1461,17 @@ export default function RMRoles() {
                                         {item.candidate_email || 'No email'} · {item.candidate_phone || 'No phone'}
                                       </div>
                                       <div className="text-xs text-slate-500 mt-1">
-                                        Discarded on {item.discarded_at ? new Date(item.discarded_at).toLocaleDateString() : 'N/A'}
+                                        {item.is_discarded === 1 ? (
+                                          <>Discarded on {item.discarded_at ? new Date(item.discarded_at).toLocaleDateString() : 'N/A'}</>
+                                        ) : (
+                                          <>Client Rejected</>
+                                        )}
                                       </div>
-                                      <div className="text-xs text-slate-600 mt-1">
-                                        Reason: {item.discarded_reason || 'N/A'}
-                                      </div>
+                                      {item.is_discarded === 1 && (
+                                        <div className="text-xs text-slate-600 mt-1">
+                                          Reason: {item.discarded_reason || 'N/A'}
+                                        </div>
+                                      )}
                                     </div>
                                     <div className="text-xs text-slate-500">
                                       Recruiter: {item.recruiter_name} ({item.recruiter_code})

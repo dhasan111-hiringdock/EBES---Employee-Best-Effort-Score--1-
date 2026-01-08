@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   BarChart3, Users, Target, TrendingDown,
   Filter, Download, AlertTriangle, Award, Lightbulb,
@@ -123,10 +123,49 @@ export default function RMAnalytics() {
     fetchFilterOptions();
   }, []);
 
+  const fetchEbesHistory = useCallback(async () => {
+    try {
+      const response = await fetchWithAuth(`/api/rm/ebes-history?days=${historyDays}`);
+      if (response.ok) {
+        const data = await response.json();
+        setEbesHistory(data);
+      }
+    } catch {}
+  }, [historyDays]);
+
+  const fetchAnalytics = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (dateFilter === 'custom' && customStartDate && customEndDate) {
+        params.append('start_date', customStartDate);
+        params.append('end_date', customEndDate);
+      } else if (dateFilter !== 'all_time') {
+        const { start, end } = getDateRange(dateFilter);
+        params.append('start_date', start);
+        params.append('end_date', end);
+      }
+      if (selectedTeam) params.append('team_id', selectedTeam);
+      if (selectedClient) params.append('client_id', selectedClient);
+      const response = await fetchWithAuth(`/api/rm/analytics-comprehensive?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setAnalytics(data);
+        generateInsights(data);
+        generateCorrectiveActions(data);
+        if (dateFilter === 'this_month' || dateFilter === 'all_time') {
+          saveEbesHistory(data.overview);
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [dateFilter, customStartDate, customEndDate, selectedTeam, selectedClient]);
+
   useEffect(() => {
     fetchAnalytics();
     fetchEbesHistory();
-  }, [dateFilter, customStartDate, customEndDate, selectedTeam, selectedClient, historyDays]);
+  }, [dateFilter, customStartDate, customEndDate, selectedTeam, selectedClient, historyDays, fetchAnalytics, fetchEbesHistory]);
 
   const fetchFilterOptions = async () => {
     try {
@@ -142,17 +181,7 @@ export default function RMAnalytics() {
     }
   };
 
-  const fetchEbesHistory = async () => {
-    try {
-      const response = await fetchWithAuth(`/api/rm/ebes-history?days=${historyDays}`);
-      if (response.ok) {
-        const data = await response.json();
-        setEbesHistory(data);
-      }
-    } catch (error) {
-      console.error('Failed to fetch EBES history:', error);
-    }
-  };
+  
 
   const saveEbesHistory = async (overview: any) => {
     try {
@@ -173,42 +202,7 @@ export default function RMAnalytics() {
     }
   };
 
-  const fetchAnalytics = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      
-      // Date range
-      if (dateFilter === 'custom' && customStartDate && customEndDate) {
-        params.append('start_date', customStartDate);
-        params.append('end_date', customEndDate);
-      } else if (dateFilter !== 'all_time') {
-        const { start, end } = getDateRange(dateFilter);
-        params.append('start_date', start);
-        params.append('end_date', end);
-      }
-
-      if (selectedTeam) params.append('team_id', selectedTeam);
-      if (selectedClient) params.append('client_id', selectedClient);
-
-      const response = await fetchWithAuth(`/api/rm/analytics-comprehensive?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setAnalytics(data);
-        generateInsights(data);
-        generateCorrectiveActions(data);
-        
-        // Save EBES history if viewing current data (no date filter or this month)
-        if (dateFilter === 'this_month' || dateFilter === 'all_time') {
-          saveEbesHistory(data.overview);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch analytics:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  
 
   const getDateRange = (filter: string) => {
     const now = new Date();

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchWithAuth } from "@/react-app/utils/api";
+import { fetchWithAuth, amSubmitCandidateToClient, amDiscardCandidate } from "@/react-app/utils/api";
 import { CheckCircle2, XCircle } from "lucide-react";
 
 interface PendingSubmission {
@@ -45,10 +45,7 @@ export default function AMSubmissions() {
   const accept = async (i: PendingSubmission) => {
     setWorkingKey(keyOf(i));
     try {
-      const res = await fetchWithAuth(
-        `/api/am/roles/${i.role_id}/candidates/${i.candidate_id}/submit-to-client`,
-        { method: "POST" }
-      );
+      const res = await amSubmitCandidateToClient(i.role_id, i.candidate_id);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error || "Submit to client failed");
@@ -68,14 +65,7 @@ export default function AMSubmissions() {
     }
     setWorkingKey(keyOf(i));
     try {
-      const res = await fetchWithAuth(
-        `/api/am/roles/${i.role_id}/candidates/${i.candidate_id}/discard`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: discardReason }),
-        }
-      );
+      const res = await amDiscardCandidate(i.role_id, i.candidate_id, discardReason);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error || "Discard failed");
@@ -189,4 +179,3 @@ export default function AMSubmissions() {
     </div>
   );
 }
-

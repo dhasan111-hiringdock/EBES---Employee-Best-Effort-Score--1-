@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { TrendingUp, TrendingDown, Award, Target, Briefcase, Users, CheckCircle, XCircle, Clock, AlertCircle, BarChart3, Eye, Download } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 import ScoreTooltip from "@/react-app/components/shared/ScoreTooltip";
@@ -96,11 +96,36 @@ export default function AMPerformance() {
     fetchAssignments();
   }, []);
 
+  const fetchPerformanceData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedClient) params.append("client_id", selectedClient.toString());
+      if (selectedTeam) params.append("team_id", selectedTeam.toString());
+      if (selectedStatus !== "all") params.append("status", selectedStatus);
+      if (dateRange === "custom" && customStartDate && customEndDate) {
+        params.append("start_date", customStartDate);
+        params.append("end_date", customEndDate);
+      } else if (dateRange !== "all_time") {
+        params.append("date_range", dateRange);
+      }
+      const response = await fetchWithAuth(`/api/am/performance?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setPerformance(data.overview);
+        setClientPerformance(data.client_performance || []);
+        setTeamPerformance(data.team_performance || []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedClient, selectedTeam, selectedStatus, dateRange, customStartDate, customEndDate]);
+
   useEffect(() => {
     if (clients.length > 0 || teams.length > 0) {
       fetchPerformanceData();
     }
-  }, [clients, teams, selectedClient, selectedTeam, selectedStatus, dateRange, customStartDate, customEndDate]);
+  }, [clients, teams, selectedClient, selectedTeam, selectedStatus, dateRange, customStartDate, customEndDate, fetchPerformanceData]);
 
   const fetchAssignments = async () => {
     try {
@@ -115,35 +140,7 @@ export default function AMPerformance() {
     }
   };
 
-  const fetchPerformanceData = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (selectedClient) params.append("client_id", selectedClient.toString());
-      if (selectedTeam) params.append("team_id", selectedTeam.toString());
-      if (selectedStatus !== "all") params.append("status", selectedStatus);
-      
-      // Date range handling
-      if (dateRange === "custom" && customStartDate && customEndDate) {
-        params.append("start_date", customStartDate);
-        params.append("end_date", customEndDate);
-      } else if (dateRange !== "all_time") {
-        params.append("date_range", dateRange);
-      }
-
-      const response = await fetchWithAuth(`/api/am/performance?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setPerformance(data.overview);
-        setClientPerformance(data.client_performance || []);
-        setTeamPerformance(data.team_performance || []);
-      }
-    } catch (error) {
-      console.error("Failed to fetch performance data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  
 
   const handleReportDownload = async (filters: ReportFilters, format: 'csv' | 'excel' | 'pdf') => {
     const selectedFields = (filters.fields && filters.fields.length > 0) ? filters.fields : [

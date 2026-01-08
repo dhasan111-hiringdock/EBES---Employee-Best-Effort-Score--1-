@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   Building2, Users, Briefcase, Target, TrendingUp, Award,
   Trophy, Star, Zap, TrendingDown, Filter, Search, Mail, Calendar,
@@ -77,6 +77,44 @@ export default function CompanyPage() {
   const [selectedClient, setSelectedClient] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
+  const fetchEmployeeProfiles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (searchQuery) params.append("search", searchQuery);
+      if (roleFilter !== "all") params.append("role", roleFilter);
+      const response = await fetchWithAuth(`/api/employees/profiles?${params.toString()}`);
+      if (response.ok) {
+        const data = await response.json();
+        setEmployees(data.profiles);
+        setEmployeeSettings(data.settings);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, roleFilter]);
+
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { start, end } = getDateRange();
+      const params = new URLSearchParams();
+      if (start && end) {
+        params.append('start_date', start);
+        params.append('end_date', end);
+      }
+      if (selectedTeam) params.append('team_id', selectedTeam);
+      if (selectedClient) params.append('client_id', selectedClient);
+      const response = await fetchWithAuth(`/api/company/data?${params.toString()}`);
+      if (response.ok) {
+        const companyData = await response.json();
+        setData(companyData);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [dateRange, customStartDate, customEndDate, selectedTeam, selectedClient]);
+
   useEffect(() => {
     if (activeTab === 'overview') {
       Promise.all([
@@ -86,19 +124,19 @@ export default function CompanyPage() {
     } else {
       fetchEmployeeProfiles();
     }
-  }, [activeTab]);
+  }, [activeTab, fetchData, fetchEmployeeProfiles]);
 
   useEffect(() => {
     if (activeTab === 'overview') {
       fetchData();
     }
-  }, [dateRange, customStartDate, customEndDate, selectedTeam, selectedClient]);
+  }, [dateRange, customStartDate, customEndDate, selectedTeam, selectedClient, fetchData]);
 
   useEffect(() => {
     if (activeTab === 'employees') {
       fetchEmployeeProfiles();
     }
-  }, [searchQuery, roleFilter]);
+  }, [searchQuery, roleFilter, fetchEmployeeProfiles]);
 
   const fetchFilterOptions = async () => {
     try {
@@ -114,25 +152,6 @@ export default function CompanyPage() {
     }
   };
 
-  const fetchEmployeeProfiles = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (searchQuery) params.append("search", searchQuery);
-      if (roleFilter !== "all") params.append("role", roleFilter);
-
-      const response = await fetchWithAuth(`/api/employees/profiles?${params.toString()}`);
-      if (response.ok) {
-        const data = await response.json();
-        setEmployees(data.profiles);
-        setEmployeeSettings(data.settings);
-      }
-    } catch (error) {
-      console.error("Failed to fetch employee profiles:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const getDateRange = () => {
     const now = new Date();
@@ -154,31 +173,7 @@ export default function CompanyPage() {
     return { start, end };
   };
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-
-      const { start, end } = getDateRange();
-      const params = new URLSearchParams();
-      
-      if (start && end) {
-        params.append('start_date', start);
-        params.append('end_date', end);
-      }
-      if (selectedTeam) params.append('team_id', selectedTeam);
-      if (selectedClient) params.append('client_id', selectedClient);
-
-      const response = await fetchWithAuth(`/api/company/data?${params.toString()}`);
-      if (response.ok) {
-        const companyData = await response.json();
-        setData(companyData);
-      }
-    } catch (error) {
-      console.error('Failed to fetch company data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  
 
   const getRoleIcon = (role: string) => {
     switch (role) {

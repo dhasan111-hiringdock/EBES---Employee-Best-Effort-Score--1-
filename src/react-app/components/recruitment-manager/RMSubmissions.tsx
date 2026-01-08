@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchWithAuth } from "@/react-app/utils/api";
+import { fetchWithAuth, rmReviewByRoleCandidate, rmSendCandidateToAM, rmDiscardCandidate } from "@/react-app/utils/api";
 import { CheckCircle2, XCircle, MapPin, FileText, DollarSign, ClipboardList } from "lucide-react";
 
 interface PendingSubmission {
@@ -72,14 +72,7 @@ export default function RMSubmissions() {
         rm_score_0_5: form.rm_score_0_5 ? Number(form.rm_score_0_5) : null,
         rm_review_date: new Date().toISOString(),
       };
-      const review = await fetchWithAuth(
-        `/api/rm/roles/${i.role_id}/candidates/${i.candidate_id}/review`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
-      );
+      const review = await rmReviewByRoleCandidate(i.role_id, i.candidate_id, payload);
       if (!review.ok) {
         const j = await review
           .json()
@@ -89,10 +82,7 @@ export default function RMSubmissions() {
           });
         throw new Error(j?.error || `Validation update failed (${review.status})`);
       }
-      const send = await fetchWithAuth(
-        `/api/rm/roles/${i.role_id}/candidates/${i.candidate_id}/send-to-am`,
-        { method: "POST" }
-      );
+      const send = await rmSendCandidateToAM(i.role_id, i.candidate_id);
       if (!send.ok) {
         const j = await send.json().catch(() => ({}));
         throw new Error(j?.error || "Send to AM failed");
@@ -115,14 +105,7 @@ export default function RMSubmissions() {
     }
     setSubmitting(true);
     try {
-      const res = await fetchWithAuth(
-        `/api/rm/roles/${i.role_id}/candidates/${i.candidate_id}/discard`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: discardReason }),
-        }
-      );
+      const res = await rmDiscardCandidate(i.role_id, i.candidate_id, discardReason);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error || "Discard failed");

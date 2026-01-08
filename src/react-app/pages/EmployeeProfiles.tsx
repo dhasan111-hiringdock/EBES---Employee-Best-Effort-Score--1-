@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Search, Users, Target, BarChart3, Building2, UsersRound, Award, Mail, Calendar, Briefcase } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
@@ -21,29 +21,26 @@ export default function EmployeeProfiles() {
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
 
-  useEffect(() => {
-    fetchProfiles();
-  }, [searchQuery, roleFilter]);
-
-  const fetchProfiles = async () => {
+  const fetchProfiles = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
       if (roleFilter !== "all") params.append("role", roleFilter);
-
       const response = await fetchWithAuth(`/api/employees/profiles?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
         setEmployees(data.profiles);
         setSettings(data.settings);
       }
-    } catch (error) {
-      console.error("Failed to fetch employee profiles:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [searchQuery, roleFilter]);
+
+  useEffect(() => {
+    fetchProfiles();
+  }, [searchQuery, roleFilter, fetchProfiles]);
 
   const getRoleIcon = (role: string) => {
     switch (role) {

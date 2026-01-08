@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Download } from "lucide-react";
-import { fetchWithAuth } from "@/react-app/utils/api";
+import { fetchWithAuth, rmReviewSubmission, rmReviewByRoleCandidate, rmSendCandidateToAM, getRmRoleSubmissions, rmDiscardCandidate } from "@/react-app/utils/api";
 import { useLocation } from "react-router";
 
 interface Role {
@@ -164,12 +164,9 @@ export default function Pipeline() {
   };
 
   const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/discard`, {
-      method: "POST",
-      body: JSON.stringify({ reason: "Discarded via Pipe" }),
-    });
+    const res = await rmDiscardCandidate(roleId, candidateId, "Discarded via Pipe");
     if (res.ok) {
-      const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
+      const r = await getRmRoleSubmissions(roleId);
       if (r.ok) {
         const payload = await r.json();
         setDataByRole((prev) => ({
@@ -189,36 +186,30 @@ export default function Pipeline() {
     const key = submissionId ?? associationId;
     const edits = key != null ? (rmEdits[key] || {}) : {};
     if (submissionId) {
-      const res = await fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
-        method: "PUT",
-        body: JSON.stringify({
-          rm_validation_status: edits.rm_validation_status ?? undefined,
-          rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
-          rm_location: edits.rm_location ?? undefined,
-          rm_work_type: edits.rm_work_type ?? undefined,
-          rm_notes: (edits as any).rm_notes ?? undefined,
-          rm_score_0_5: edits.rm_score_0_5 ?? undefined,
-          rm_review_date: (edits as any).rm_review_date ?? undefined,
-        }),
+      const res = await rmReviewSubmission(submissionId, {
+        rm_validation_status: edits.rm_validation_status ?? undefined,
+        rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
+        rm_location: edits.rm_location ?? undefined,
+        rm_work_type: edits.rm_work_type ?? undefined,
+        rm_notes: (edits as any).rm_notes ?? undefined,
+        rm_score_0_5: edits.rm_score_0_5 ?? undefined,
+        rm_review_date: (edits as any).rm_review_date ?? undefined,
       });
       if (res.ok) {
         setRmEdits((prev) => ({ ...prev, [submissionId]: { ...(prev[submissionId] || {}) } }));
       }
     } else if (roleId && candidateId) {
-      const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/review`, {
-        method: "PUT",
-        body: JSON.stringify({
-          rm_validation_status: edits.rm_validation_status ?? undefined,
-          rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
-          rm_location: edits.rm_location ?? undefined,
-          rm_work_type: edits.rm_work_type ?? undefined,
-          rm_notes: (edits as any).rm_notes ?? undefined,
-          rm_score_0_5: edits.rm_score_0_5 ?? undefined,
-          rm_review_date: (edits as any).rm_review_date ?? undefined,
-        }),
+      const res = await rmReviewByRoleCandidate(roleId, candidateId, {
+        rm_validation_status: edits.rm_validation_status ?? undefined,
+        rm_payment: (edits as any).rm_payment ?? (edits as any).rm_rate_bill ?? undefined,
+        rm_location: edits.rm_location ?? undefined,
+        rm_work_type: edits.rm_work_type ?? undefined,
+        rm_notes: (edits as any).rm_notes ?? undefined,
+        rm_score_0_5: edits.rm_score_0_5 ?? undefined,
+        rm_review_date: (edits as any).rm_review_date ?? undefined,
       });
       if (res.ok && roleId) {
-        const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
+        const r = await getRmRoleSubmissions(roleId);
         if (r.ok) {
           const payload = await r.json();
           setDataByRole((prev) => ({ ...prev, [roleId]: { pending_evaluation: payload.pending_evaluation || [], under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
@@ -236,16 +227,14 @@ export default function Pipeline() {
 
   const sendToAM = async (roleId: number, candidateId: number, submissionId?: number, associationId?: number) => {
     await saveRmReview(submissionId, roleId, candidateId, associationId);
-    const res = await fetchWithAuth(`/api/rm/roles/${roleId}/candidates/${candidateId}/send-to-am`, {
-      method: "POST",
-    });
+    const res = await rmSendCandidateToAM(roleId, candidateId);
     const payload = await res.json().catch(() => null);
     if (!res.ok) {
       alert((payload && (payload as any).error) || "Failed to send to AM");
       return;
     }
     if (res.ok) {
-      const r = await fetchWithAuth(`/api/rm/role-submissions/${roleId}`);
+      const r = await getRmRoleSubmissions(roleId);
       if (r.ok) {
         const payload = await r.json();
         setDataByRole((prev) => ({ ...prev, [roleId]: { pending_evaluation: payload.pending_evaluation || [], under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));

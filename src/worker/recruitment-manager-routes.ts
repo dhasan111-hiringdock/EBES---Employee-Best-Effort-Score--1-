@@ -2234,6 +2234,7 @@ app.get("/api/rm/role-submissions/:roleId", rmOnly, async (c) => {
         cra.is_discarded,
         cra.discarded_at,
         cra.discarded_reason,
+        cra.updated_at,
         u.name as recruiter_name,
         u.user_code as recruiter_code,
         rs.id as submission_id,
@@ -2263,8 +2264,8 @@ app.get("/api/rm/role-submissions/:roleId", rmOnly, async (c) => {
   
   return c.json({
     pending_evaluation: results.filter((r: any) => (r as any).is_discarded !== 1 && isPending((r as any).association_status)),
-    under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && !isPending((r as any).association_status)),
-    rejected: results.filter((r: any) => (r as any).is_discarded === 1),
+    under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && !isPending((r as any).association_status) && (r as any).association_status !== 'client_rejected'),
+    rejected: results.filter((r: any) => (r as any).is_discarded === 1 || (r as any).association_status === 'client_rejected'),
   });
 } catch (error: any) {
   console.error("Error fetching role submissions:", error);

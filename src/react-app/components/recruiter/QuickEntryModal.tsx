@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { X, Briefcase, Calendar, TrendingUp, UserX, FileText } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
@@ -47,33 +47,27 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
   // Dropdown role selection modal
   const [showDropoutModal, setShowDropoutModal] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, [client]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!client) return;
-    
     try {
-      // Fetch active roles for deals
       const rolesResponse = await fetchWithAuth(`/api/recruiter/roles/${client.id}/${client.team_id}`);
       if (rolesResponse.ok) {
         const rolesData = await rolesResponse.json();
         setActiveRoles(rolesData);
       }
-
-      // Fetch deal roles for dropouts (filtered by selected client and team)
       const dealRolesResponse = await fetchWithAuth(`/api/recruiter/deal-roles?client_id=${client.id}&team_id=${client.team_id}`);
       if (dealRolesResponse.ok) {
         const dealRolesData = await dealRolesResponse.json();
         setDealRoles(dealRolesData);
       }
-    } catch (error) {
-      console.error("Failed to fetch roles:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [client]);
+
+  useEffect(() => {
+    fetchData();
+  }, [client, fetchData]);
 
   useEffect(() => {
     const fetchCandidates = async () => {
