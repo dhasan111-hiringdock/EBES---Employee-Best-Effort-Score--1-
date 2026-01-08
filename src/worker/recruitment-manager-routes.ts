@@ -2259,7 +2259,7 @@ app.get("/api/rm/role-submissions/:roleId", rmOnly, async (c) => {
 
   const results = rows.results || [];
   
-  const isPending = (s: string) => s === 'rm_evaluation' || s === 'submitted';
+  const isPending = (s: string) => s === 'rm_evaluation';
   
   return c.json({
     pending_evaluation: results.filter((r: any) => (r as any).is_discarded !== 1 && isPending((r as any).association_status)),
