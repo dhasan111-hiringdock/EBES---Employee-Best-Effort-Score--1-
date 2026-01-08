@@ -5,6 +5,7 @@ import RecruiterAnalytics from "@/react-app/pages/RecruiterAnalytics";
 import RecruiterCandidates from "@/react-app/pages/RecruiterCandidates";
 import RecruiterRoles from "@/react-app/pages/RecruiterRoles";
 import CompanyPage from "@/react-app/pages/CompanyPage";
+import RecruiterLedger from "@/react-app/pages/RecruiterLedger";
 import RecruiterProfile from "@/react-app/components/recruiter/RecruiterProfile";
 import { Building2, Target, CalendarDays, Users, TrendingUp, Plus, Zap, Clock, Briefcase, Activity, Search, BarChart3, AlertTriangle } from "lucide-react";
 import AddSubmissionModal from '@/react-app/components/recruiter/AddSubmissionModal';
@@ -132,6 +133,7 @@ export default function RecruiterDashboard() {
         <Route path="analytics" element={<RecruiterAnalytics />} />
         <Route path="candidates" element={<RecruiterCandidates />} />
         <Route path="roles" element={<RecruiterRoles />} />
+        <Route path="ledger" element={<RecruiterLedger />} />
         <Route path="company" element={<CompanyPage />} />
         <Route path="profile" element={<RecruiterProfile />} />
         <Route path="*" element={<Navigate to="/recruiter" replace />} />

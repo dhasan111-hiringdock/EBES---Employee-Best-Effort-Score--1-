@@ -1,5 +1,5 @@
 import { NavLink } from "react-router";
-import { LayoutDashboard, BarChart3, UserCircle, LogOut, Building2, TrendingUp, Users, Briefcase } from "lucide-react";
+import { LayoutDashboard, BarChart3, UserCircle, LogOut, Building2, TrendingUp, Users, Briefcase, FileText } from "lucide-react";
 import { useAuth } from "@/react-app/hooks/useAuth";
 import { useEffect, useState } from "react";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
@@ -55,6 +55,7 @@ export default function RecruiterLayout({ children, selectedClient, onClientChan
     { to: "/recruiter/analytics", icon: BarChart3, label: "Analytics", end: false },
     { to: "/recruiter/candidates", icon: Users, label: "Candidates", end: false },
     { to: "/recruiter/roles", icon: Briefcase, label: "Roles", end: false },
+    { to: "/recruiter/ledger", icon: FileText, label: "Submissions Ledger", end: false },
     { to: "/recruiter/profile", icon: UserCircle, label: "Profile", end: false },
   ];
 
