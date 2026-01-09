@@ -2,7 +2,8 @@ const DEFAULT_API_BASE = 'https://ebes-app.dhasan111.workers.dev';
 const DEV_BASE = typeof window !== 'undefined' && window.location && window.location.origin.includes('localhost')
   ? 'http://localhost:8787'
   : undefined;
-const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? DEV_BASE ?? DEFAULT_API_BASE;
+const LS_BASE = typeof window !== 'undefined' ? (localStorage.getItem('api_base') || undefined) : undefined;
+const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? LS_BASE ?? DEV_BASE ?? DEFAULT_API_BASE;
 const requestCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 5000; // 5 seconds cache for GET requests
 
@@ -166,4 +167,34 @@ export async function getRmRoleSubmissions(roleId: number): Promise<Response> {
 
 export async function getAmRoleSubmissions(roleId: number): Promise<Response> {
   return fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+}
+
+export async function recruiterDiscardCandidateFromRole(roleId: number, candidateId: number, reason?: string): Promise<Response> {
+  return fetchWithAuth(`/api/recruiter/candidates/${candidateId}/roles/${roleId}/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function getRecruiterRoleSubmissions(roleId: number): Promise<Response> {
+  return fetchWithAuth(`/api/recruiter/role-submissions/${roleId}`);
+}
+
+export async function recruiterMarkDeal(roleId: number, candidateId: number): Promise<Response> {
+  return fetchWithAuth(`/api/recruiter/roles/${roleId}/candidates/${candidateId}/deal`, {
+    method: 'POST',
+  });
+}
+
+export async function recruiterSeedSampleData(perRole?: number, clientId?: number, teamId?: number): Promise<Response> {
+  return fetchWithAuth(`/api/recruiter/seed/sample-data`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      per_role: perRole,
+      client_id: clientId,
+      team_id: teamId,
+    }),
+  });
 }

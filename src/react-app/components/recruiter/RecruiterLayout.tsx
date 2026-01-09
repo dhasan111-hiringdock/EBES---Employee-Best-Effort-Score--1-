@@ -56,6 +56,7 @@ export default function RecruiterLayout({ children, selectedClient, onClientChan
     { to: "/recruiter/candidates", icon: Users, label: "Candidates", end: false },
     { to: "/recruiter/roles", icon: Briefcase, label: "Roles", end: false },
     { to: "/recruiter/ledger", icon: FileText, label: "Submissions Ledger", end: false },
+    { to: "/recruiter/pipeline", icon: LayoutDashboard, label: "Pipe", end: false },
     { to: "/recruiter/profile", icon: UserCircle, label: "Profile", end: false },
   ];
 

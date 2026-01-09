@@ -13,12 +13,14 @@ export default function RecruiterLedger() {
   const [loading, setLoading] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'excel' | 'pdf'>('csv');
   const [tableLoading, setTableLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'roles' | 'candidates'>('roles');
   const [entries, setEntries] = useState<Array<{
     event_date: string;
     event_type: string;
     candidate_name: string;
     role_title: string;
     role_code?: string;
+    role_status?: string;
     client_name: string;
     team_name: string;
     submission_type?: string;
@@ -79,6 +81,7 @@ export default function RecruiterLedger() {
     if (eventType !== 'all') params.append('event_type', eventType);
     if (statusFilter !== 'all') params.append('status', statusFilter);
     if (search.trim()) params.append('search', search.trim());
+    params.append('view', viewMode);
     const pg = targetPage ?? page;
     const ps = targetPageSize ?? pageSize;
     params.append('page', String(pg));
@@ -98,7 +101,7 @@ export default function RecruiterLedger() {
   useEffect(() => {
     setPage(1);
     fetchLedger(1, pageSize);
-  }, [dateRange, startDate, endDate, eventType, statusFilter, search]);
+  }, [dateRange, startDate, endDate, eventType, statusFilter, search, viewMode]);
   useEffect(() => {
     fetchLedger(page, pageSize);
   }, [page, pageSize]);
@@ -144,6 +147,15 @@ export default function RecruiterLedger() {
               className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
+          <select
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as any)}
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            title="View By"
+          >
+            <option value="roles">View: Roles</option>
+            <option value="candidates">View: Candidates</option>
+          </select>
           <select
             value={eventType}
             onChange={(e) => setEventType(e.target.value as any)}

@@ -78,6 +78,197 @@ app.get("/api/recruiter/clients", recruiterOnly, async (c) => {
   }
 });
 
+app.post("/api/recruiter/seed/sample-data", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const perRole = Math.max(1, Math.min(Number(body?.per_role || 6), 20));
+  const clientIdParam = body?.client_id ? Number(body.client_id) : null;
+  const teamIdParam = body?.team_id ? Number(body.team_id) : null;
+  try {
+    const teamRows = await db
+      .prepare(`
+        SELECT team_id FROM recruiter_team_assignments 
+        WHERE recruiter_user_id = ?
+      `)
+      .bind((recruiterUser as any).id)
+      .all();
+    const clientRows = await db
+      .prepare(`
+        SELECT client_id FROM recruiter_client_assignments 
+        WHERE recruiter_user_id = ?
+      `)
+      .bind((recruiterUser as any).id)
+      .all();
+    let teamIds = (teamRows.results || []).map((t: any) => (t as any).team_id);
+    let clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).client_id);
+    if (teamIdParam != null) teamIds = [teamIdParam];
+    if (clientIdParam != null) clientIds = [clientIdParam];
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      return c.json({ error: "No teams or clients found for recruiter" }, 404);
+    }
+    let filter = "";
+    if (teamIds.length > 0 && clientIds.length > 0) {
+      filter = `WHERE r.team_id IN (${teamIds.join(",")}) OR r.client_id IN (${clientIds.join(",")})`;
+    } else if (teamIds.length > 0) {
+      filter = `WHERE r.team_id IN (${teamIds.join(",")})`;
+    } else if (clientIds.length > 0) {
+      filter = `WHERE r.client_id IN (${clientIds.join(",")})`;
+    }
+    const roleRows = await db
+      .prepare(`
+        SELECT r.id, r.client_id, r.team_id, r.account_manager_id, r.title 
+        FROM am_roles r
+        ${filter}
+        ORDER BY r.created_at DESC
+      `)
+      .all();
+    const roles = roleRows.results || [];
+    if (roles.length === 0) {
+      return c.json({ error: "No roles found to seed" }, 404);
+    }
+    const ensureCandidateCode = async () => {
+      const counter = await db
+        .prepare("SELECT next_number FROM code_counters WHERE category = 'candidate'")
+        .first();
+      if (!counter) {
+        await db
+          .prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 1)")
+          .run();
+        return 1;
+      }
+      return (counter as any).next_number || 1;
+    };
+    const generateCandidateCode = async () => {
+      const next = await ensureCandidateCode();
+      const code = `NL-${String(next).padStart(4, "0")}`;
+      await db
+        .prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = 'candidate'")
+        .run();
+      return code;
+    };
+    const pickRMForTeam = async (teamId: number | null) => {
+      if (!teamId) return null;
+      const rm = await db
+        .prepare(`
+          SELECT u.id 
+          FROM users u
+          INNER JOIN team_assignments ta ON u.id = ta.user_id
+          WHERE ta.team_id = ? AND u.role = 'recruitment_manager'
+          LIMIT 1
+        `)
+        .bind(teamId)
+        .first();
+      return rm ? (rm as any).id : null;
+    };
+    const statuses = ["rm_evaluation", "submitted", "client_submitted", "client_rejected", "deal", "discarded"];
+    for (const role of roles) {
+      const r = role as any;
+      const rmId = await pickRMForTeam(r.team_id);
+      for (let i = 0; i < Math.min(perRole, statuses.length); i++) {
+        const status = statuses[i];
+        const daysAgo = 3 + i;
+        const submissionDate = new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+        const candCode = await generateCandidateCode();
+        const name = `Candidate ${r.title} ${status.toUpperCase()} ${i + 1}`;
+        const email = `cand_${r.id}_${status}_${i + 1}@example.com`;
+        const phone = `+1-555-01${String(r.id).padStart(2, "0")}${i}`;
+        const notes = `Auto-seeded for ${r.title} ${status}`;
+        const candRes = await db
+          .prepare(`
+            INSERT INTO candidates (candidate_code, name, email, phone, resume_url, notes, created_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `)
+          .bind(candCode, name, email, phone, null, notes, (recruiterUser as any).id)
+          .run();
+        const candidateId = candRes.meta.last_row_id;
+        const isDiscarded = status === "discarded" ? 1 : 0;
+        const assocStatus = status === "discarded" ? "rm_evaluation" : status;
+        const discardedReason = isDiscarded ? "Discarded during review" : null;
+        await db
+          .prepare(`
+            INSERT INTO candidate_role_associations
+            (candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, discarded_at, discarded_reason, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+          `)
+          .bind(
+            candidateId,
+            r.id,
+            (recruiterUser as any).id,
+            r.client_id,
+            r.team_id,
+            assocStatus,
+            submissionDate,
+            isDiscarded,
+            isDiscarded ? new Date().toISOString() : null,
+            discardedReason
+          )
+          .run();
+        if (!isDiscarded) {
+          const workType = i % 2 === 0 ? "SOW" : "Payroll";
+          const validationStatus = i % 2 === 0 ? "Validated" : "Pending";
+          const scorePercent = 60 + i * 5;
+          const rmRateBill = 700 + i * 25;
+          const rmRatePay = 500 + i * 20;
+          const rmLocation = i % 2 === 0 ? "Berlin" : "Madrid";
+          const rmNotes = `RM review for ${name}`;
+          await db
+            .prepare(`
+              INSERT INTO recruiter_submissions
+              (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, candidate_name, rm_validation_status, rm_rate_bill, rm_rate_pay, rm_location, rm_work_type, cv_match_percent, rm_notes, rm_reviewed_at, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            `)
+            .bind(
+              (recruiterUser as any).id,
+              r.client_id,
+              r.team_id,
+              r.id,
+              r.account_manager_id,
+              rmId,
+              i % 3 === 0 ? "after_24h" : i % 3 === 1 ? "24h" : "6h",
+              submissionDate,
+              notes,
+              "submission",
+              null,
+              name,
+              validationStatus,
+              rmRateBill,
+              rmRatePay,
+              rmLocation,
+              workType,
+              scorePercent,
+              rmNotes
+            )
+            .run();
+        }
+      }
+      const todayStr = new Date().toISOString().slice(0, 10);
+      await db
+        .prepare(`
+          INSERT INTO recruiter_submissions
+          (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind((recruiterUser as any).id, r.client_id, r.team_id, r.id, r.account_manager_id, rmId, "after_24h", todayStr, "Interview round 1", "interview", 1)
+        .run();
+      await db
+        .prepare(`
+          INSERT INTO recruiter_submissions
+          (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind((recruiterUser as any).id, r.client_id, r.team_id, r.id, r.account_manager_id, rmId, "after_24h", todayStr, "Interview round 2", "interview", 2)
+        .run();
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: "Failed to seed sample data" }, 500);
+  }
+});
+
 // Get assigned teams for recruiter
 app.get("/api/recruiter/teams", recruiterOnly, async (c) => {
   const db = c.env.DB;
@@ -342,6 +533,58 @@ app.get("/api/recruiter/roles/:roleId/candidates", recruiterOnly, async (c) => {
   } catch (error) {
     console.error("Error fetching role candidates:", error);
     return c.json({ error: "Failed to fetch role candidates" }, 500);
+  }
+});
+
+// Role submissions for current recruiter
+app.get("/api/recruiter/role-submissions/:roleId", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  const roleId = c.req.param("roleId");
+  try {
+    const rows = await db.prepare(`
+      SELECT 
+        cra.id as association_id,
+        cra.candidate_id,
+        c.name as candidate_name,
+        c.email as candidate_email,
+        c.phone as candidate_phone,
+        cra.status as association_status,
+        cra.submission_date,
+        cra.is_discarded,
+        cra.discarded_at,
+        cra.discarded_reason,
+        cra.updated_at,
+        u.name as recruiter_name,
+        u.user_code as recruiter_code,
+        rs.id as submission_id,
+        ROUND(rs.cv_match_percent / 20.0, 2) as score,
+        rs.rm_validation_status,
+        rs.rm_rate_bill,
+        rs.rm_rate_pay,
+        rs.rm_location,
+        rs.rm_work_type
+      FROM candidate_role_associations cra
+      LEFT JOIN candidates c ON cra.candidate_id = c.id
+      LEFT JOIN users u ON cra.recruiter_user_id = u.id
+      LEFT JOIN recruiter_submissions rs 
+        ON rs.role_id = cra.role_id 
+       AND rs.recruiter_user_id = cra.recruiter_user_id 
+       AND rs.entry_type = 'submission'
+       AND DATE(rs.submission_date) = DATE(cra.submission_date)
+      WHERE cra.role_id = ? AND cra.recruiter_user_id = ?
+      ORDER BY cra.submission_date DESC, cra.id DESC
+    `).bind(roleId, (recruiterUser as any).id).all();
+
+    const results = rows.results || [];
+    const isPending = (s: string) => s === 'rm_evaluation';
+    return c.json({
+      under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && !isPending((r as any).association_status) && (r as any).association_status !== 'client_rejected'),
+      rejected: results.filter((r: any) => (r as any).is_discarded === 1 || (r as any).association_status === 'client_rejected'),
+    });
+  } catch (error: any) {
+    console.error("Error fetching recruiter role submissions:", error);
+    return c.json({ error: error.message }, 500);
   }
 });
 
@@ -1795,6 +2038,7 @@ app.get("/api/recruiter/ledger", recruiterOnly, async (c) => {
     const eventTypeParam = c.req.query("event_type");
     const statusFilterParam = c.req.query("status");
     const searchParam = c.req.query("search");
+    const viewParam = c.req.query("view"); // roles | candidates
     const todayStr = new Date().toISOString().slice(0, 10);
     let startDate = todayStr;
     let endDate = todayStr;
@@ -1826,6 +2070,222 @@ app.get("/api/recruiter/ledger", recruiterOnly, async (c) => {
     const sortDesc = String(sortOrderParam).toLowerCase() !== "asc";
     const page = Math.max(1, parseInt(String(pageParam || "1"), 10));
     const pageSize = Math.max(1, parseInt(String(pageSizeParam || "25"), 10));
+    const isArchiveRoles = viewParam === "roles";
+    const isArchiveCandidates = viewParam === "candidates";
+
+    if (isArchiveRoles || isArchiveCandidates) {
+      const rsParams: any[] = [(recruiterUser as any).id, startDate, endDate];
+      let rsWhere = "rs.recruiter_user_id = ? AND DATE(rs.submission_date) BETWEEN ? AND ?";
+      let rsTypeClause = " AND rs.entry_type IN ('submission','interview','deal','dropout')";
+      if (eventType && ["submission", "interview", "deal", "dropout"].includes(eventType)) {
+        rsTypeClause = " AND rs.entry_type = ?";
+        rsParams.push(eventType);
+      }
+      let rsSearchClause = "";
+      let rsSearchParams: any[] = [];
+      if (search.length > 0) {
+        rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+        const like = `%${search}%`;
+        rsSearchParams = [like, like, like, like];
+      }
+      const rsRows = await db
+        .prepare(
+          `
+          SELECT 
+            DATE(rs.submission_date) as event_date,
+            rs.entry_type as event_type,
+            rs.candidate_name,
+            ar.id as role_id,
+            ar.title as role_title,
+            ar.role_code as role_code,
+            ar.status as role_status,
+            cl.name as client_name,
+            t.name as team_name
+          FROM recruiter_submissions rs
+          INNER JOIN am_roles ar ON rs.role_id = ar.id
+          INNER JOIN clients cl ON ar.client_id = cl.id
+          INNER JOIN app_teams t ON ar.team_id = t.id
+          WHERE ${rsWhere}${rsTypeClause}${rsSearchClause}
+          ORDER BY rs.submission_date DESC
+          `
+        )
+        .bind(...rsParams, ...rsSearchParams)
+        .all();
+
+      const craBaseParams: any[] = [(recruiterUser as any).id];
+      let craWhere = "cra.recruiter_user_id = ? AND cra.is_discarded = 0";
+      let craDateClause = " AND ((cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?) OR (cra.status IN ('submitted','client_submitted','client_rejected','deal') AND DATE(cra.updated_at) BETWEEN ? AND ?))";
+      let craDateParams: any[] = [startDate, endDate, startDate, endDate];
+      if (eventType && ["rm_evaluation", "submitted", "client_submitted", "client_rejected", "deal"].includes(eventType)) {
+        craDateClause =
+          eventType === "rm_evaluation"
+            ? " AND (cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?)"
+            : " AND (cra.status = ? AND DATE(cra.updated_at) BETWEEN ? AND ?)";
+        craDateParams =
+          eventType === "rm_evaluation"
+            ? [startDate, endDate]
+            : [eventType, startDate, endDate];
+      }
+      let craSearchClause = "";
+      let craSearchParams: any[] = [];
+      if (search.length > 0) {
+        craSearchClause = " AND (c.name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+        const like = `%${search}%`;
+        craSearchParams = [like, like, like, like];
+      }
+      const craRows = await db
+        .prepare(
+          `
+          SELECT 
+            CASE 
+              WHEN cra.status = 'rm_evaluation' THEN DATE(cra.submission_date)
+              ELSE DATE(cra.updated_at)
+            END as event_date,
+            cra.status as event_type,
+            c.id as candidate_id,
+            c.name as candidate_name,
+            ar.id as role_id,
+            ar.title as role_title,
+            ar.role_code as role_code,
+            ar.status as role_status,
+            cl.name as client_name,
+            t.name as team_name
+          FROM candidate_role_associations cra
+          INNER JOIN candidates c ON c.id = cra.candidate_id
+          INNER JOIN am_roles ar ON ar.id = cra.role_id
+          INNER JOIN clients cl ON cl.id = cra.client_id
+          INNER JOIN app_teams t ON t.id = cra.team_id
+          WHERE ${craWhere}${craDateClause}${craSearchClause}
+          ORDER BY event_date DESC
+          `
+        )
+        .bind(...craBaseParams, ...craDateParams, ...craSearchParams)
+        .all();
+
+      const discardedParams: any[] = [(recruiterUser as any).id, startDate, endDate];
+      let discardedSearchClause = "";
+      let discardedSearchParams: any[] = [];
+      if (search.length > 0) {
+        discardedSearchClause = " AND (c.name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+        const like = `%${search}%`;
+        discardedSearchParams = [like, like, like, like];
+      }
+      const discardRows = await db
+        .prepare(
+          `
+          SELECT 
+            DATE(cra.discarded_at) as event_date,
+            'discarded' as event_type,
+            c.id as candidate_id,
+            c.name as candidate_name,
+            ar.id as role_id,
+            ar.title as role_title,
+            ar.role_code as role_code,
+            ar.status as role_status,
+            cl.name as client_name,
+            t.name as team_name
+          FROM candidate_role_associations cra
+          INNER JOIN candidates c ON c.id = cra.candidate_id
+          INNER JOIN am_roles ar ON ar.id = cra.role_id
+          INNER JOIN clients cl ON cl.id = cra.client_id
+          INNER JOIN app_teams t ON t.id = cra.team_id
+          WHERE cra.recruiter_user_id = ? AND cra.is_discarded = 1 AND DATE(cra.discarded_at) BETWEEN ? AND ?${discardedSearchClause}
+          ORDER BY cra.discarded_at DESC
+          `
+        )
+        .bind(...discardedParams, ...discardedSearchParams)
+        .all();
+
+      const rsEvents = (rsRows.results || []).map((r: any) => ({
+        event_date: (r as any).event_date,
+        event_type: (r as any).event_type,
+        candidate_id: null,
+        candidate_name: (r as any).candidate_name || "",
+        role_id: (r as any).role_id,
+        role_title: (r as any).role_title || "",
+        role_code: (r as any).role_code || "",
+        role_status: (r as any).role_status || "",
+        client_name: (r as any).client_name || "",
+        team_name: (r as any).team_name || ""
+      }));
+      const craEvents = (craRows.results || []).map((r: any) => ({
+        event_date: (r as any).event_date,
+        event_type: (r as any).event_type,
+        candidate_id: (r as any).candidate_id,
+        candidate_name: (r as any).candidate_name || "",
+        role_id: (r as any).role_id,
+        role_title: (r as any).role_title || "",
+        role_code: (r as any).role_code || "",
+        role_status: (r as any).role_status || "",
+        client_name: (r as any).client_name || "",
+        team_name: (r as any).team_name || ""
+      }));
+      const discardedEvents = (discardRows.results || []).map((r: any) => ({
+        event_date: (r as any).event_date,
+        event_type: "discarded",
+        candidate_id: (r as any).candidate_id,
+        candidate_name: (r as any).candidate_name || "",
+        role_id: (r as any).role_id,
+        role_title: (r as any).role_title || "",
+        role_code: (r as any).role_code || "",
+        role_status: (r as any).role_status || "",
+        client_name: (r as any).client_name || "",
+        team_name: (r as any).team_name || ""
+      }));
+
+      let combined = [...craEvents, ...discardedEvents, ...(isArchiveRoles ? rsEvents : [])];
+
+      const filterByStatus = (arr: any[]) => {
+        if (statusFilter === "in_play") {
+          return arr.filter((e) => e.event_type === "submission" || e.event_type === "rm_evaluation" || e.event_type === "submitted" || e.event_type === "interview");
+        } else if (statusFilter === "positive") {
+          return arr.filter((e) => e.event_type === "client_submitted" || e.event_type === "deal" || e.event_type === "interview");
+        } else if (statusFilter === "negative") {
+          return arr.filter((e) => e.event_type === "client_rejected" || e.event_type === "discarded" || e.event_type === "dropout");
+        }
+        return arr;
+      };
+      combined = filterByStatus(combined);
+      if (eventType) {
+        combined = combined.filter((e) => e.event_type === eventType);
+      }
+
+      combined.sort((a, b) => {
+        const at = new Date(a.event_date).getTime();
+        const bt = new Date(b.event_date).getTime();
+        return bt - at;
+      });
+
+      const latestByKey: Record<string, any> = {};
+      const keyProp = isArchiveRoles ? "role_id" : "candidate_id";
+      for (const e of combined) {
+        const key = String((e as any)[keyProp] ?? "");
+        if (!key) continue;
+        const prev = latestByKey[key];
+        if (!prev || new Date(e.event_date).getTime() > new Date(prev.event_date).getTime()) {
+          latestByKey[key] = e;
+        }
+      }
+      const rows = Object.values(latestByKey).map((e: any) => ({
+        event_date: e.event_date,
+        event_type: e.event_type,
+        candidate_name: e.candidate_name || "",
+        role_title: e.role_title || "",
+        role_code: e.role_code || "",
+        role_status: e.role_status || "",
+        client_name: e.client_name || "",
+        team_name: e.team_name || "",
+        submission_type: "",
+        interview_level: "",
+        cv_match_percent: "",
+        notes: ""
+      }));
+      const total = rows.length;
+      const start = (page - 1) * pageSize;
+      const paged = rows.slice(start, start + pageSize);
+      return c.json({ events: paged, total });
+    }
+
     const rsParams: any[] = [(recruiterUser as any).id, startDate, endDate];
     let rsWhere = "rs.recruiter_user_id = ? AND DATE(rs.submission_date) BETWEEN ? AND ?";
     if (eventType && ["submission", "interview", "deal", "dropout"].includes(eventType)) {

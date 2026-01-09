@@ -37,18 +37,38 @@ export default function Login() {
     localStorage.clear();
 
     try {
-      const loginUrl = API_BASE ? `${API_BASE}/api/auth/login` : '/api/auth/login';
-      const response = await fetch(loginUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+      const bases: string[] = [API_BASE, DEFAULT_API_BASE].filter((b): b is string => !!b);
+      let response: Response | null = null;
+      let data: any = null;
+      let chosenBase: string | null = null;
+      for (const base of bases) {
+        try {
+          const res = await fetch(`${base}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          const ct = res.headers.get('content-type') || '';
+          const isJson = ct.includes('application/json');
+          const json = isJson ? await res.json() : null;
+          response = res;
+          data = json;
+          chosenBase = base;
+          if (res.ok) break;
+        } catch {}
+      }
 
-      const ct = response.headers.get('content-type') || '';
-      const isJson = ct.includes('application/json');
-      const data = isJson ? await response.json() : null;
+      if (!response) {
+        setError('Service not available. Please try again later.');
+        return;
+      }
 
       if (response.ok) {
+        if (chosenBase) {
+          try {
+            localStorage.setItem('api_base', chosenBase);
+          } catch {}
+        }
         const accounts = (data as any)?.users || ((data as any)?.user ? [(data as any).user] : []);
         if (accounts.length > 1) {
           setAccountChoices(accounts);
@@ -71,7 +91,8 @@ export default function Login() {
           setError('Invalid login response');
         }
       } else {
-        setError((data as any)?.error || (isJson ? 'Invalid email or password' : 'Service not available. Please try again later.'));
+        const isJsonErr = data !== null;
+        setError((data as any)?.error || (isJsonErr ? 'Invalid email or password' : 'Service not available. Please try again later.'));
       }
     } catch (error) {
       console.error('Login error:', error);
