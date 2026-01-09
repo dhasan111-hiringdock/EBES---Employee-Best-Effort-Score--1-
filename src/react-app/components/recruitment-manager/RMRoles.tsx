@@ -16,7 +16,8 @@ import {
   User,
   Plus,
   Edit,
-  UserPlus
+  UserPlus,
+  Send
 } from 'lucide-react';
 import { fetchWithAuth, rmDiscardCandidate, rmSendCandidateToAM, rmReviewSubmission, rmReviewByRoleCandidate } from '@/react-app/utils/api';
 import CreateRoleModal from './CreateRoleModal';
@@ -879,6 +880,111 @@ export default function RMRoles() {
                     <p className="text-slate-700 mt-2 leading-relaxed">{selectedRole.description}</p>
                   </div>
                 )}
+
+                {/* Submissions in Play */}
+                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-6 border-2 border-indigo-200">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="bg-indigo-100 rounded-lg p-2">
+                      <Send className="w-6 h-6 text-indigo-600" />
+                    </div>
+                    <label className="text-lg font-semibold text-indigo-900">Submissions in Play</label>
+                  </div>
+                  <p className="text-5xl font-bold text-indigo-600">{selectedRole.in_play_submissions || 0}</p>
+                  <p className="text-sm text-indigo-700 mt-2">Active candidates being tracked</p>
+                </div>
+
+                {/* Role Statistics */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-blue-100 rounded-lg p-2">
+                        <Send className="w-5 h-5 text-blue-600" />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold text-blue-600">{selectedRole.total_submissions || 0}</p>
+                    <p className="text-xs text-slate-600 mt-1 font-medium">Total Submissions</p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-purple-100 rounded-lg p-2">
+                        <Users className="w-5 h-5 text-purple-600" />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold text-purple-600">{selectedRole.total_interviews || 0}</p>
+                    <p className="text-xs text-slate-600 mt-1 font-medium">Interviews</p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-emerald-100 rounded-lg p-2">
+                        <TrendingUp className="w-5 h-5 text-emerald-600" />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold text-emerald-600">{selectedRole.status === 'deal' ? 1 : 0}</p>
+                    <p className="text-xs text-slate-600 mt-1 font-medium">Deals</p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-indigo-100 rounded-lg p-2">
+                        <Users className="w-5 h-5 text-indigo-600" />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold text-indigo-600">{selectedRole.in_play_submissions || 0}</p>
+                    <p className="text-xs text-slate-600 mt-1 font-medium">Candidates</p>
+                  </div>
+                </div>
+
+                {/* Candidate Status */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-green-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-green-100 rounded-lg p-2">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                      </div>
+                      <label className="text-sm font-semibold text-slate-600">Active Candidates</label>
+                    </div>
+                    <p className="text-3xl font-bold text-green-600">{submissions.under_consideration.length || 0}</p>
+                    <p className="text-xs text-slate-500 mt-1">Still in process</p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-red-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-red-100 rounded-lg p-2">
+                        <XCircle className="w-5 h-5 text-red-600" />
+                      </div>
+                      <label className="text-sm font-semibold text-slate-600">Discarded</label>
+                    </div>
+                    <p className="text-3xl font-bold text-red-600">{(submissions.rejected || []).filter((r: any) => (r as any).is_discarded === 1).length}</p>
+                    <p className="text-xs text-slate-500 mt-1">Not suitable</p>
+                  </div>
+                </div>
+
+                {/* Client Flow */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-emerald-100 rounded-lg p-2">
+                        <CheckCircle className="w-5 h-5 text-emerald-600" />
+                      </div>
+                      <label className="text-sm font-semibold text-slate-600">Client Submitted</label>
+                    </div>
+                    <p className="text-3xl font-bold text-emerald-600">{selectedRole.under_client_evaluation || 0}</p>
+                    <p className="text-xs text-slate-500 mt-1">Under client evaluation</p>
+                  </div>
+
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="bg-red-100 rounded-lg p-2">
+                        <XCircle className="w-5 h-5 text-red-600" />
+                      </div>
+                      <label className="text-sm font-semibold text-slate-600">Client Rejected</label>
+                    </div>
+                    <p className="text-3xl font-bold text-red-600">{selectedRole.client_rejected || 0}</p>
+                    <p className="text-xs text-slate-500 mt-1">Rejected by client</p>
+                  </div>
+                </div>
 
                 {/* Details Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
