@@ -12,6 +12,8 @@ import {
   Building2,
   Clock,
   X,
+  Download,
+  Bell,
   Calendar,
   User,
   Plus,
@@ -47,6 +49,14 @@ interface Role {
   client_rejected?: number;
   in_play_submissions?: number;
   total_interviews?: number;
+  total_deals?: number;
+  total_candidates?: number;
+  active_candidates?: number;
+  discarded_candidates?: number;
+  client_submitted?: number;
+  days_open?: number;
+  first_submission_days?: number | null;
+  first_interview_days?: number | null;
 }
 
 interface Client {
@@ -121,6 +131,53 @@ export default function RMRoles() {
   const [, setAcceptOpen] = useState<Record<number, boolean>>({});
   const submissionsRef = useRef<HTMLDivElement | null>(null);
   const [detailsTab, setDetailsTab] = useState<'role' | 'submissions'>('submissions');
+  const [sortKey, setSortKey] = useState<'recent' | 'title' | 'client' | 'team' | 'status'>('recent');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [companySla, setCompanySla] = useState<{ sla_rm_eval_days: number; sla_submitted_days: number; sla_client_feedback_days: number } | null>(null);
+  const [openReminderRoleId, setOpenReminderRoleId] = useState<number | null>(null);
+  const [remindersRoleDisabled, setRemindersRoleDisabled] = useState<Record<number, boolean>>({});
+  const [remindersClientDisabled, setRemindersClientDisabled] = useState<Record<string, boolean>>({});
+  const [remindersRoleSnooze, setRemindersRoleSnooze] = useState<Record<number, string>>({});
+  const allExportFields = [
+    'role_code',
+    'title',
+    'client_name',
+    'team_name',
+    'account_manager_name',
+    'status',
+    'total_submissions',
+    'total_interviews',
+    'total_deals',
+    'total_candidates',
+    'active_candidates',
+    'discarded_candidates',
+    'in_play_submissions',
+    'client_submitted',
+    'client_rejected',
+    'created_at'
+  ];
+  const fieldLabels: Record<string, string> = {
+    role_code: 'Role Code',
+    title: 'Title',
+    client_name: 'Client',
+    team_name: 'Team',
+    account_manager_name: 'Account Manager',
+    status: 'Status',
+    total_submissions: 'Submissions',
+    total_interviews: 'Interviews',
+    total_deals: 'Deals',
+    total_candidates: 'Candidates',
+    active_candidates: 'Active Candidates',
+    discarded_candidates: 'Discarded Candidates',
+    in_play_submissions: 'In-Play Submissions',
+    client_submitted: 'Client Submitted',
+    client_rejected: 'Client Rejected',
+    created_at: 'Created At'
+  };
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportFields, setExportFields] = useState<string[]>(allExportFields);
+  const [exportPresets, setExportPresets] = useState<Array<{ name: string; fields: string[] }>>([]);
+  const [presetName, setPresetName] = useState('');
   
   const pendingEvalCount = submissions.pending_evaluation?.length || 0;
 
@@ -158,6 +215,7 @@ export default function RMRoles() {
       params.append('status', activeTab);
       if (clientFilter) params.append('client_id', clientFilter);
       if (teamFilter) params.append('team_id', teamFilter);
+      if (searchTerm) params.append('search', searchTerm);
 
       const response = await fetchWithAuth(`/api/rm/roles?${params.toString()}`);
       
@@ -169,11 +227,85 @@ export default function RMRoles() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, clientFilter, teamFilter]);
+  }, [activeTab, clientFilter, teamFilter, searchTerm]);
 
   useEffect(() => {
     fetchRoles();
   }, [fetchRoles]);
+
+  useEffect(() => {
+    try {
+      const presetsStr = localStorage.getItem('rmRolesExportPresets');
+      if (presetsStr) {
+        const parsed = JSON.parse(presetsStr);
+        if (Array.isArray(parsed)) setExportPresets(parsed);
+      }
+      const lastFieldsStr = localStorage.getItem('rmRolesExportLastFields');
+      if (lastFieldsStr) {
+        const arr = JSON.parse(lastFieldsStr);
+        if (Array.isArray(arr) && arr.length > 0) {
+          setExportFields(arr.filter((f: string) => allExportFields.includes(f)));
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const loadFilters = async () => {
+      try {
+        const saved = localStorage.getItem('rmRolesFilters');
+        if (saved) {
+          const f = JSON.parse(saved);
+          if (f.activeTab === 'active' || f.activeTab === 'non-active') setActiveTab(f.activeTab);
+          if (typeof f.clientFilter === 'string') setClientFilter(f.clientFilter);
+          if (typeof f.teamFilter === 'string') setTeamFilter(f.teamFilter);
+          if (typeof f.searchTerm === 'string') setSearchTerm(f.searchTerm);
+          if (['recent','title','client','team','status'].includes(f.sortKey)) setSortKey(f.sortKey);
+          if (f.sortOrder === 'asc' || f.sortOrder === 'desc') setSortOrder(f.sortOrder);
+        }
+      } catch {}
+    };
+    loadFilters();
+  }, []);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const res = await fetchWithAuth('/api/company/settings');
+        if (res && res.ok) {
+          const data = await res.json();
+          setCompanySla({
+            sla_rm_eval_days: data.sla_rm_eval_days,
+            sla_submitted_days: data.sla_submitted_days,
+            sla_client_feedback_days: data.sla_client_feedback_days
+          });
+        }
+      } catch {}
+      try {
+        const rd = localStorage.getItem('rmRolesRemindersRoleDisabled');
+        const rc = localStorage.getItem('rmRolesRemindersClientDisabled');
+        const rs = localStorage.getItem('rmRolesRemindersRoleSnooze');
+        if (rd) setRemindersRoleDisabled(JSON.parse(rd));
+        if (rc) setRemindersClientDisabled(JSON.parse(rc));
+        if (rs) setRemindersRoleSnooze(JSON.parse(rs));
+      } catch {}
+    };
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const payload = {
+        activeTab,
+        clientFilter,
+        teamFilter,
+        searchTerm,
+        sortKey,
+        sortOrder
+      };
+      localStorage.setItem('rmRolesFilters', JSON.stringify(payload));
+    } catch {}
+  }, [activeTab, clientFilter, teamFilter, searchTerm, sortKey, sortOrder]);
 
   useEffect(() => {
     if (selectedRole) {
@@ -199,17 +331,185 @@ export default function RMRoles() {
     }
   };
 
+  const openExport = () => {
+    setIsExportOpen(true);
+  };
+  const toggleField = (f: string) => {
+    setExportFields((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
+  };
+  const selectAllFields = () => {
+    setExportFields(allExportFields);
+  };
+  const clearAllFields = () => {
+    setExportFields([]);
+  };
+  const savePreset = () => {
+    const name = presetName.trim();
+    if (!name) return;
+    setExportPresets((prev) => {
+      const filtered = prev.filter((p) => p.name !== name);
+      const next = [...filtered, { name, fields: exportFields }];
+      try {
+        localStorage.setItem('rmRolesExportPresets', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+  const applyPresetByName = (name: string) => {
+    const p = exportPresets.find((x) => x.name === name);
+    if (!p) return;
+    setExportFields(p.fields.filter((f) => allExportFields.includes(f)));
+  };
+  const deletePresetByName = (name: string) => {
+    setExportPresets((prev) => {
+      const next = prev.filter((p) => p.name !== name);
+      try {
+        localStorage.setItem('rmRolesExportPresets', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+  const exportSelectedCsv = () => {
+    const fields = exportFields.length > 0 ? exportFields : allExportFields;
+    const headers = fields;
+    const csvRows = roles.map((r) =>
+      fields
+        .map((f) => {
+          switch (f) {
+            case 'role_code':
+              return (r.role_code || '').replace(/,/g, ' ');
+            case 'title':
+              return (r.title || '').replace(/,/g, ' ');
+            case 'client_name':
+              return (r.client_name || '').replace(/,/g, ' ');
+            case 'team_name':
+              return (r.team_name || '').replace(/,/g, ' ');
+            case 'account_manager_name':
+              return (r.account_manager_name || '').replace(/,/g, ' ');
+            case 'status':
+              return r.status || '';
+            case 'total_submissions':
+              return String(r.total_submissions || 0);
+            case 'total_interviews':
+              return String(r.total_interviews || 0);
+            case 'total_deals':
+              return String(r.total_deals || 0);
+            case 'total_candidates':
+              return String(r.total_candidates || 0);
+            case 'active_candidates':
+              return String(r.active_candidates || 0);
+            case 'discarded_candidates':
+              return String(r.discarded_candidates || 0);
+            case 'in_play_submissions':
+              return String(r.in_play_submissions || 0);
+            case 'client_submitted':
+              return String(r.client_submitted || r.under_client_evaluation || 0);
+            case 'client_rejected':
+              return String(r.client_rejected || 0);
+            case 'created_at':
+              return r.created_at || '';
+            default:
+              return '';
+          }
+        })
+        .join(',')
+    );
+    const csv = [headers.join(',')].concat(csvRows).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rm-roles-${activeTab}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    try {
+      localStorage.setItem('rmRolesExportLastFields', JSON.stringify(fields));
+    } catch {}
+    setIsExportOpen(false);
+  };
+
+  const setRoleReminderDisabled = (roleId: number, disabled: boolean) => {
+    setRemindersRoleDisabled((prev) => {
+      const next = { ...prev, [roleId]: disabled };
+      try { localStorage.setItem('rmRolesRemindersRoleDisabled', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const setClientReminderDisabled = (clientName: string, disabled: boolean) => {
+    setRemindersClientDisabled((prev) => {
+      const next = { ...prev, [clientName]: disabled };
+      try { localStorage.setItem('rmRolesRemindersClientDisabled', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const setRoleReminderSnooze = (roleId: number, days: number) => {
+    const until = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    setRemindersRoleSnooze((prev) => {
+      const next = { ...prev, [roleId]: until };
+      try { localStorage.setItem('rmRolesRemindersRoleSnooze', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const clearRoleReminderSnooze = (roleId: number) => {
+    setRemindersRoleSnooze((prev) => {
+      const next = { ...prev };
+      delete next[roleId];
+      try { localStorage.setItem('rmRolesRemindersRoleSnooze', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const getSnoozeLabel = (roleId: number) => {
+    const iso = remindersRoleSnooze[roleId];
+    if (!iso) return '';
+    const until = new Date(iso).getTime();
+    const now = Date.now();
+    const diffDays = Math.max(0, Math.ceil((until - now) / (24 * 60 * 60 * 1000)));
+    return diffDays > 0 ? `${diffDays}d snoozed` : '';
+  };
   
 
-  const filteredRoles = roles.filter(role => {
-    const matchesSearch = 
-      role.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      role.role_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      role.client_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      role.team_name.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    return matchesSearch;
-  });
+  const filteredRoles = (() => {
+    const base = roles.filter(role => {
+      const q = searchTerm.toLowerCase();
+      const matchesSearch = 
+        (role.title || '').toLowerCase().includes(q) ||
+        (role.role_code || '').toLowerCase().includes(q) ||
+        (role.client_name || '').toLowerCase().includes(q) ||
+        (role.team_name || '').toLowerCase().includes(q);
+      return matchesSearch;
+    });
+    const statusWeight = (s: string) => {
+      if (s === 'deal') return 5;
+      if (s === 'active') return 4;
+      if (s === 'on_hold') return 3;
+      if (s === 'lost') return 2;
+      if (s === 'cancelled') return 1;
+      return 0;
+    };
+    const sorted = [...base].sort((a, b) => {
+      if (sortKey === 'title') {
+        const cmp = (a.title || '').localeCompare(b.title || '');
+        return sortOrder === 'desc' ? cmp : -cmp;
+      }
+      if (sortKey === 'client') {
+        const cmp = (a.client_name || '').localeCompare(b.client_name || '');
+        return sortOrder === 'desc' ? cmp : -cmp;
+      }
+      if (sortKey === 'team') {
+        const cmp = (a.team_name || '').localeCompare(b.team_name || '');
+        return sortOrder === 'desc' ? cmp : -cmp;
+      }
+      if (sortKey === 'status') {
+        const wa = statusWeight(a.status || '');
+        const wb = statusWeight(b.status || '');
+        return sortOrder === 'desc' ? wb - wa : wa - wb;
+      }
+      const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return sortOrder === 'desc' ? db - da : da - db;
+    });
+    return sorted;
+  })();
 
   const stats: RoleStats = {
     total: roles.length,
@@ -384,6 +684,14 @@ export default function RMRoles() {
         </div>
         <div className="flex gap-3">
           <button
+            onClick={openExport}
+            className="flex items-center gap-2 px-6 py-3 border border-slate-300 bg-white text-slate-700 rounded-xl hover:bg-slate-50 transition-colors shadow-sm"
+            title="Export CSV"
+          >
+            <Download className="w-5 h-5" />
+            Export
+          </button>
+          <button
             onClick={() => setShowAssignModal(true)}
             className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors shadow-lg hover:shadow-xl"
           >
@@ -556,6 +864,33 @@ export default function RMRoles() {
               ))}
             </select>
           </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Sort</label>
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as any)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none bg-white"
+              >
+                <option value="recent">Recent</option>
+                <option value="title">Title</option>
+                <option value="client">Client</option>
+                <option value="team">Team</option>
+                <option value="status">Status</option>
+              </select>
+            </div>
+            <div className="w-28">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Order</label>
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as any)}
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none bg-white"
+              >
+                <option value="desc">Desc</option>
+                <option value="asc">Asc</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -617,6 +952,32 @@ export default function RMRoles() {
                   <p className="text-sm text-slate-600 mb-3 line-clamp-2">{role.description}</p>
                 )}
 
+                <div className="ml-0 space-y-1 text-sm">
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                    {typeof role.days_open === 'number' && (
+                      <span className="px-2 py-1 rounded-md bg-slate-100 text-slate-700 text-xs flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> {role.days_open}d open
+                      </span>
+                    )}
+                    {typeof role.first_submission_days === 'number' && role.first_submission_days !== null && (
+                      <span className="px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-xs">first sub {role.first_submission_days}d</span>
+                    )}
+                    {typeof role.first_interview_days === 'number' && role.first_interview_days !== null && (
+                      <span className="px-2 py-1 rounded-md bg-purple-50 text-purple-700 text-xs">first interview {role.first_interview_days}d</span>
+                    )}
+                    {companySla && (
+                      <span className="px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 text-xs">
+                        target submit ≤ {companySla.sla_submitted_days}d • feedback ≤ {companySla.sla_client_feedback_days}d
+                      </span>
+                    )}
+                    {(remindersRoleDisabled[role.id] || remindersClientDisabled[role.client_name] || getSnoozeLabel(role.id)) && (
+                      <span className="px-2 py-1 rounded-md bg-yellow-50 text-yellow-700 text-xs">
+                        {remindersRoleDisabled[role.id] ? 'role reminders off' : remindersClientDisabled[role.client_name] ? 'client reminders off' : getSnoozeLabel(role.id)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   <div className="bg-indigo-50 rounded-lg p-3 border border-indigo-100">
                     <p className="text-xs text-indigo-700 mb-1 font-semibold">Total Submissions</p>
@@ -655,6 +1016,14 @@ export default function RMRoles() {
                     Details
                   </button>
                   <button
+                    onClick={(e) => { e.stopPropagation(); setOpenReminderRoleId(openReminderRoleId === role.id ? null : role.id); }}
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                    title="Reminder controls"
+                  >
+                    <Bell className="w-3 h-3" />
+                    Reminders
+                  </button>
+                  <button
                     onClick={(e) => handleEdit(role, e)}
                     className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
                     title="Edit role"
@@ -663,6 +1032,24 @@ export default function RMRoles() {
                     Edit
                   </button>
                 </div>
+                {openReminderRoleId === role.id && (
+                  <div className="relative">
+                    <div className="absolute right-0 mt-2 bg-white border border-slate-200 rounded-lg shadow-lg p-3 z-20">
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Reminder controls</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button onClick={() => { setRoleReminderSnooze(role.id, 1); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Snooze 1d</button>
+                        <button onClick={() => { setRoleReminderSnooze(role.id, 3); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Snooze 3d</button>
+                        <button onClick={() => { setRoleReminderSnooze(role.id, 7); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Snooze 7d</button>
+                        <button onClick={() => { clearRoleReminderSnooze(role.id); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Clear Snooze</button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 mt-2">
+                        <button onClick={() => { setRoleReminderDisabled(role.id, true); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Disable for role</button>
+                        <button onClick={() => { setClientReminderDisabled(role.client_name, true); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Disable for client</button>
+                        <button onClick={() => { setRoleReminderDisabled(role.id, false); setClientReminderDisabled(role.client_name, false); setOpenReminderRoleId(null); }} className="px-2 py-1 text-xs rounded-md border border-slate-300 hover:bg-slate-50">Enable reminders</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -815,6 +1202,106 @@ export default function RMRoles() {
         </div>
       )}
 
+      {isExportOpen && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-lg border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold text-slate-800">Export Roles</h3>
+              <button
+                onClick={() => setIsExportOpen(false)}
+                className="p-2 rounded-md hover:bg-slate-100"
+                title="Close"
+              >
+                <X className="w-5 h-5 text-slate-600" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-72 overflow-auto">
+              {allExportFields.map((f) => (
+                <label key={f} className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={exportFields.includes(f)}
+                    onChange={() => toggleField(f)}
+                  />
+                  <span className="text-sm text-slate-700">{fieldLabels[f] || f}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center gap-3 mt-4">
+              <button
+                onClick={selectAllFields}
+                className="px-3 py-2 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Select All
+              </button>
+              <button
+                onClick={clearAllFields}
+                className="px-3 py-2 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="mt-6 space-y-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="Preset name"
+                  className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                />
+                <button
+                  onClick={savePreset}
+                  className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                >
+                  Save Preset
+                </button>
+              </div>
+              {exportPresets.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <select
+                    onChange={(e) => applyPresetByName(e.target.value)}
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    defaultValue=""
+                  >
+                    <option value="">Apply Preset</option>
+                    {exportPresets.map((p) => (
+                      <option key={p.name} value={p.name}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const name = presetName.trim();
+                      if (name) deletePresetByName(name);
+                    }}
+                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  >
+                    Delete Preset
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setIsExportOpen(false)}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={exportSelectedCsv}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+                title="Export Selected"
+              >
+                <Download className="w-4 h-4" />
+                Export Selected
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Role Details Modal */}
       {selectedRole && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">

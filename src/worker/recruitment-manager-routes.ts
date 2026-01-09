@@ -404,6 +404,7 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
   const status = c.req.query("status");
   const clientId = c.req.query("client_id");
   const teamId = c.req.query("team_id");
+  const searchQuery = c.req.query("search");
 
   try {
     // Get RM's assigned teams
@@ -445,8 +446,8 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
         u.name as account_manager_name,
         u.user_code as account_manager_code,
         (SELECT COUNT(*) 
-         FROM candidate_role_associations cra 
-         WHERE cra.role_id = r.id AND cra.is_discarded = 0) as total_submissions,
+         FROM recruiter_submissions rs 
+         WHERE rs.role_id = r.id AND rs.entry_type = 'submission') as total_submissions,
         (SELECT SUM(CASE WHEN cra.status = 'rm_evaluation' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
          WHERE cra.role_id = r.id) as under_evaluation,
@@ -456,15 +457,37 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
         (SELECT SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
          WHERE cra.role_id = r.id) as under_client_evaluation,
+        (SELECT SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
+         FROM candidate_role_associations cra
+         WHERE cra.role_id = r.id) as client_submitted,
         (SELECT SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END)
          FROM candidate_role_associations cra
          WHERE cra.role_id = r.id) as client_rejected,
         (SELECT COUNT(DISTINCT cra.candidate_id) 
          FROM candidate_role_associations cra 
          WHERE cra.role_id = r.id AND cra.is_discarded = 0) as in_play_submissions,
+        (SELECT COUNT(DISTINCT cra.candidate_id) 
+         FROM candidate_role_associations cra 
+         WHERE cra.role_id = r.id) as total_candidates,
+        (SELECT COUNT(DISTINCT cra.candidate_id) 
+         FROM candidate_role_associations cra 
+         WHERE cra.role_id = r.id AND cra.is_discarded = 0) as active_candidates,
+        (SELECT COUNT(DISTINCT cra.candidate_id) 
+         FROM candidate_role_associations cra 
+         WHERE cra.role_id = r.id AND cra.is_discarded = 1) as discarded_candidates,
         (SELECT COUNT(*) 
          FROM recruiter_submissions rs 
-         WHERE rs.role_id = r.id AND rs.entry_type = 'interview') as total_interviews
+         WHERE rs.role_id = r.id AND rs.entry_type = 'deal') as total_deals,
+        (SELECT COUNT(*) 
+         FROM recruiter_submissions rs 
+         WHERE rs.role_id = r.id AND rs.entry_type = 'interview') as total_interviews,
+        CAST(julianday('now') - julianday(r.created_at) AS INTEGER) as days_open,
+        (SELECT CAST(julianday(MIN(rs2.submission_date)) - julianday(r.created_at) AS INTEGER)
+         FROM recruiter_submissions rs2
+         WHERE rs2.role_id = r.id AND rs2.entry_type = 'submission') as first_submission_days,
+        (SELECT CAST(julianday(MIN(rs3.submission_date)) - julianday(r.created_at) AS INTEGER)
+         FROM recruiter_submissions rs3
+         WHERE rs3.role_id = r.id AND rs3.entry_type = 'interview') as first_interview_days
       FROM am_roles r
       INNER JOIN clients c ON r.client_id = c.id
       INNER JOIN app_teams t ON r.team_id = t.id
@@ -495,6 +518,10 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
       }
     }
 
+    if (searchQuery) {
+      query += " AND (r.title LIKE ? OR r.role_code LIKE ?)";
+      params.push(`%${searchQuery}%`, `%${searchQuery}%`);
+    }
     // Apply client filter
     if (clientId) {
       query += " AND r.client_id = ?";
