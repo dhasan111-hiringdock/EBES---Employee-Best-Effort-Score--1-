@@ -77,14 +77,30 @@ async function generateUserCode(db: any, role: string): Promise<string> {
     .bind(category)
     .first();
 
-  const number = (counter as any).next_number;
+  let number: number;
+  if (!counter) {
+    const maxRow = await db
+      .prepare(`
+        SELECT COALESCE(MAX(CAST(SUBSTR(user_code, INSTR(user_code, '-') + 1) AS INTEGER)), 0) as max_num
+        FROM users
+        WHERE role = ? AND user_code LIKE ?
+      `)
+      .bind(role, `${prefix}-%`)
+      .first();
+    const nextNumber = (((maxRow as any)?.max_num) || 0) + 1;
+    await db
+      .prepare("INSERT INTO code_counters (category, next_number) VALUES (?, ?)")
+      .bind(category, nextNumber + 1)
+      .run();
+    number = nextNumber;
+  } else {
+    number = (counter as any).next_number;
+    await db
+      .prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = ?")
+      .bind(category)
+      .run();
+  }
   const code = `${prefix}-${number.toString().padStart(3, "0")}`;
-
-  // Increment counter
-  await db
-    .prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = ?")
-    .bind(category)
-    .run();
 
   return code;
 }
@@ -1719,6 +1735,13 @@ app.post("/api/admin/master-reset", adminOnly, async (c) => {
       `)
       .bind(email, name, password)
       .run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('admin', 2)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('recruitment_manager', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('account_manager', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('recruiter', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('role', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('am_role', 1)").run();
     return c.json({ success: true, admin_user_id: res.meta.last_row_id, email });
   } catch (error: any) {
     return c.json({ error: error?.message || "Failed to perform master reset" }, 500);
@@ -1773,6 +1796,13 @@ app.post("/api/system/master-reset", async (c) => {
       `)
       .bind(email, name, password)
       .run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('admin', 2)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('recruitment_manager', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('account_manager', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('recruiter', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('role', 1)").run();
+    await db.prepare("INSERT INTO code_counters (category, next_number) VALUES ('am_role', 1)").run();
     return c.json({ success: true, admin_user_id: res.meta.last_row_id, email });
   } catch (error: any) {
     return c.json({ error: error?.message || "Failed to perform master reset" }, 500);

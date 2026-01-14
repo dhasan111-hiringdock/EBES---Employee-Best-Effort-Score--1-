@@ -84,6 +84,7 @@ export default function RecruiterPipeline() {
   const [refreshToken, setRefreshToken] = useState<number>(0);
   const quickReasons = useMemo(() => ["Not a fit", "Lack of required skills", "Better candidate found", "Recruiter error", "Client request"], []);
   const [pipeModal, setPipeModal] = useState<{ roleId: number; roleCode: string; title: string; status: string } | null>(null);
+  const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
  
   useEffect(() => {
     const loadClients = async () => {
@@ -719,10 +720,36 @@ export default function RecruiterPipeline() {
                               <td className="py-2 px-3 text-sm text-gray-700">{row.rm_work_type || "-"}</td>
                               <td className="py-2 px-3 text-sm text-gray-700">{row.submission_date?.slice(0, 10) || "-"}</td>
                               <td className="py-2 px-3 text-sm text-gray-700">{row.rm_validation_status || "-"}</td>
-                              <td className="py-2 px-3">
-                                <span className={`px-2 py-1 rounded text-xs border ${statusChipClass(row)}`} title={statusChipLabel(row)}>
+                              <td className="py-2 px-3 text-sm relative">
+                                <button
+                                  className={`px-2 py-1 rounded text-xs border ${statusChipClass(row)}`}
+                                  title={statusChipLabel(row)}
+                                  onClick={() => setOpenMenuFor(`${pipeModal.roleId}:${row.candidate_id}`)}
+                                >
                                   {statusChipLabel(row)}
-                                </span>
+                                </button>
+                                {openMenuFor === `${pipeModal.roleId}:${row.candidate_id}` && (
+                                  <div className="absolute z-10 mt-2 bg-white border border-gray-200 rounded shadow-lg p-2 w-48">
+                                    <button
+                                      className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
+                                      onClick={() => {
+                                        setOpenMenuFor(null);
+                                        markDeal(pipeModal.roleId, row.candidate_id!);
+                                      }}
+                                    >
+                                      Deal
+                                    </button>
+                                    <button
+                                      className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded text-red-600"
+                                      onClick={() => {
+                                        setOpenMenuFor(null);
+                                        setNoteDialog({ roleId: pipeModal.roleId, candidateId: row.candidate_id! });
+                                      }}
+                                    >
+                                      Discard
+                                    </button>
+                                  </div>
+                                )}
                               </td>
                               <td className="py-2 px-3 text-right">
                                 {row.is_discarded !== 1 ? (
