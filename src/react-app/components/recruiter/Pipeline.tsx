@@ -72,17 +72,18 @@ export default function RecruiterPipeline() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [roleStatus, setRoleStatus] = useState<"active" | "non-active">("active");
   const [search, setSearch] = useState("");
-  const [expandedRoleId, setExpandedRoleId] = useState<number | null>(null);
   const [dataByRole, setDataByRole] = useState<Record<number, { under_consideration: RoleSubmission[]; rejected: RoleSubmission[] }>>({});
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [sortKey, setSortKey] = useState<"recent" | "score" | "location" | "contract" | "payment">("recent");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [candidateStatusFilter, setCandidateStatusFilter] = useState<string>("all");
+  const [roleStatusFilter, setRoleStatusFilter] = useState<"all" | "active" | "lost" | "deal" | "on_hold" | "cancelled" | "no_answer">("all");
   const [noteDialog, setNoteDialog] = useState<{ roleId: number; candidateId: number } | null>(null);
   const [noteText, setNoteText] = useState<string>("");
   const [noteError, setNoteError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<number>(0);
   const quickReasons = useMemo(() => ["Not a fit", "Lack of required skills", "Better candidate found", "Recruiter error", "Client request"], []);
+  const [pipeModal, setPipeModal] = useState<{ roleId: number; roleCode: string; title: string; status: string } | null>(null);
  
   useEffect(() => {
     const loadClients = async () => {
@@ -161,13 +162,6 @@ export default function RecruiterPipeline() {
         setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: under, rejected: rej } }));
       }
     } catch {}
-  };
-
-  const toggleExpand = (roleId: number) => {
-    setExpandedRoleId((prev) => (prev === roleId ? null : roleId));
-    if (!dataByRole[roleId]) {
-      loadRoleCandidates(roleId);
-    }
   };
 
   const exportRoleRows = (role: Role) => {
@@ -423,7 +417,6 @@ export default function RecruiterPipeline() {
         ) : (
           <div className="space-y-4">
             {roles.map((role) => {
-              const bucket = dataByRole[role.id] || { under_consideration: [], rejected: [] };
               return (
                 <div key={role.id} className="bg-white rounded-2xl shadow-sm border border-slate-200">
                   <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
@@ -442,11 +435,16 @@ export default function RecruiterPipeline() {
                         Rejected: {(dataByRole[role.id]?.rejected?.length ?? role.client_rejected ?? role.discarded_candidates ?? 0)}
                       </span>
                       <button
-                        onClick={() => toggleExpand(role.id)}
+                        onClick={() => {
+                          setPipeModal({ roleId: role.id, roleCode: role.role_code, title: role.title, status: role.status });
+                          if (!dataByRole[role.id]) {
+                            loadRoleCandidates(role.id);
+                          }
+                        }}
                         className="px-3 py-2 text-sm rounded-lg border border-slate-300 hover:bg-slate-50"
-                        title="Toggle"
+                        title="Open Pipe"
                       >
-                        {expandedRoleId === role.id ? "Hide" : "Show"}
+                        Open Pipe
                       </button>
                       <button
                         onClick={() => exportRoleRows(role)}
@@ -458,158 +456,7 @@ export default function RecruiterPipeline() {
                       </button>
                     </div>
                   </div>
-                  {expandedRoleId === role.id && (
-                    <div className="p-4 overflow-x-auto">
-                      <div className="mb-4 flex items-center gap-3">
-                        <input
-                          value={searchTerm}
-                          onChange={(e) => setSearchTerm(e.target.value)}
-                          placeholder="Search candidates…"
-                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                          title="Search candidates"
-                        />
-                        <select
-                          value={candidateStatusFilter}
-                          onChange={(e) => setCandidateStatusFilter(e.target.value)}
-                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                          title="Filter by status"
-                        >
-                          <option value="all">All</option>
-                          <option value="rm_evaluation">Submitted to AM</option>
-                          <option value="client_submitted">Submitted to Client</option>
-                          <option value="client_rejected">Client Rejected</option>
-                          <option value="deal">Deal</option>
-                          <option value="discarded">Discarded</option>
-                        </select>
-                        <select
-                          value={sortKey}
-                          onChange={(e) => setSortKey(e.target.value as any)}
-                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                          title="Sort by"
-                        >
-                          <option value="recent">Recent</option>
-                          <option value="score">Score</option>
-                          <option value="location">Location</option>
-                          <option value="contract">Contract</option>
-                          <option value="payment">Payment</option>
-                        </select>
-                        <select
-                          value={sortOrder}
-                          onChange={(e) => setSortOrder(e.target.value as any)}
-                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                          title="Order"
-                        >
-                          <option value="desc">Desc</option>
-                          <option value="asc">Asc</option>
-                        </select>
-                      </div>
-                      <table className="w-full">
-                        <thead>
-                          <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Candidate</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Location</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Payment</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Score (0–5)</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Contract Type</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Date Submitted</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">RM Status</th>
-                            <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Current Status</th>
-                            <th className="text-right py-2 px-3 text-xs font-semibold text-slate-700">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(() => {
-                            const rows = [...(bucket.under_consideration || []), ...(bucket.rejected || [])];
-                            const term = searchTerm.trim().toLowerCase();
-                            const filteredByStatus = rows.filter((row) => {
-                              if (candidateStatusFilter === "all") return true;
-                              if (candidateStatusFilter === "discarded") return row.is_discarded === 1;
-                              return (row.association_status || "") === candidateStatusFilter && row.is_discarded !== 1;
-                            });
-                            const filtered = term
-                              ? filteredByStatus.filter((row) => {
-                                  const c = (row.candidate_name || "").toLowerCase();
-                                  const rec = `${row.recruiter_name || ""} ${row.recruiter_code || ""}`.toLowerCase();
-                                  const loc = (row.rm_location || "").toLowerCase();
-                                  return c.includes(term) || rec.includes(term) || loc.includes(term);
-                                })
-                              : filteredByStatus;
-                            const sorted = [...filtered].sort((a, b) => {
-                              if (sortKey === "score") {
-                                const sa = a.score != null ? Number(a.score) : -Infinity;
-                                const sb = b.score != null ? Number(b.score) : -Infinity;
-                                return sortOrder === "desc" ? sb - sa : sa - sb;
-                              }
-                              if (sortKey === "location") {
-                                const cmp = (a.rm_location || "").localeCompare(b.rm_location || "");
-                                return sortOrder === "desc" ? cmp : -cmp;
-                              }
-                              if (sortKey === "contract") {
-                                const cmp = (a.rm_work_type || "").localeCompare(b.rm_work_type || "");
-                                return sortOrder === "desc" ? cmp : -cmp;
-                              }
-                              if (sortKey === "payment") {
-                                const pa = a.rm_rate_bill != null ? Number(a.rm_rate_bill) : -Infinity;
-                                const pb = b.rm_rate_bill != null ? Number(b.rm_rate_bill) : -Infinity;
-                                return sortOrder === "desc" ? pb - pa : pa - pb;
-                              }
-                              const da = a.submission_date ? new Date(a.submission_date).getTime() : 0;
-                              const db = b.submission_date ? new Date(b.submission_date).getTime() : 0;
-                              return sortOrder === "desc" ? db - da : da - db;
-                            });
-                            return sorted.map((row) => (
-                              <tr id={`assoc-${row.association_id}`} key={row.association_id || `${row.candidate_id}-${row.submission_id || 0}`} className="border-b border-slate-100 hover:bg-slate-50">
-                                <td className="py-2 px-3">
-                                  <div className="font-medium text-slate-900">{row.candidate_name || "Unknown"}</div>
-                                  <div className="text-xs text-slate-500">
-                                    {row.recruiter_name} · {row.recruiter_code}
-                                  </div>
-                                </td>
-                                <td className="py-2 px-3 text-sm text-slate-700">{row.rm_location || "-"}</td>
-                                <td className="py-2 px-3 text-sm text-slate-700" title={`Contract: ${row.rm_work_type || "-"} • Unit: ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || '-'}`}>
-                                  {formatPayment(row)}
-                                </td>
-                                <td className="py-2 px-3 text-sm text-slate-700">{row.score != null ? Number(row.score).toFixed(2) : "-"}</td>
-                                <td className="py-2 px-3 text-sm text-slate-700">{row.rm_work_type || "-"}</td>
-                                <td className="py-2 px-3 text-sm text-slate-700">{row.submission_date?.slice(0, 10) || "-"}</td>
-                                <td className="py-2 px-3 text-sm text-slate-700">{row.rm_validation_status || "-"}</td>
-                                <td className="py-2 px-3">
-                                  <span className={`px-2 py-1 rounded text-xs border ${statusChipClass(row)}`} title={statusChipLabel(row)}>
-                                    {statusChipLabel(row)}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3 text-right">
-                                  {row.is_discarded !== 1 ? (
-                                    <div className="flex items-center justify-end gap-2">
-                                      {row.association_status === 'client_submitted' && (
-                                        <button
-                                          onClick={() => markDeal(role.id, row.candidate_id!)}
-                                          className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                                        >
-                                          Mark Deal
-                                        </button>
-                                      )}
-                                      <button
-                                        className="text-xs px-3 py-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
-                                        onClick={() => setNoteDialog({ roleId: role.id, candidateId: row.candidate_id! })}
-                                      >
-                                        Discard
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <span className="text-xs text-slate-400">—</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ));
-                          })()}
-                        </tbody>
-                      </table>
-                      {bucket.under_consideration.length === 0 && bucket.rejected.length === 0 && (
-                        <div className="text-slate-600 text-sm px-3">No candidates yet for this role.</div>
-                      )}
-                    </div>
-                  )}
+                  {/* Inline expand section removed; Pipe modal covers candidate details */}
                 </div>
               );
             })}
@@ -619,54 +466,294 @@ export default function RecruiterPipeline() {
  
       {noteDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200">
-            <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-t-2xl">
-              <h3 className="text-lg font-bold text-slate-800">Discard Candidate</h3>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-md p-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Discard Candidate</h3>
+            <p className="text-sm text-gray-600 mb-3">Add a note</p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {quickReasons.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setNoteText((prev) => (prev ? `${prev} ${r}` : r))}
+                  className="px-2 py-1 text-xs rounded-full border border-gray-300 hover:bg-gray-50"
+                >
+                  {r}
+                </button>
+              ))}
             </div>
-            <div className="px-6 py-5 space-y-4">
-              <p className="text-sm text-slate-700">Add a note</p>
-              <div className="flex flex-wrap gap-2">
-                {quickReasons.map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => setNoteText((prev) => (prev ? `${prev} ${r}` : r))}
-                    className="px-2 py-1 text-xs rounded-full border border-slate-300 hover:bg-slate-50"
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-              <textarea
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
-                rows={4}
-                value={noteText}
-                onChange={(e) => {
-                  setNoteText(e.target.value);
+            <textarea
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              rows={4}
+              value={noteText}
+              onChange={(e) => {
+                setNoteText(e.target.value);
+                setNoteError(null);
+              }}
+              placeholder="Reason or details"
+            />
+            {noteError && <div className="mt-2 text-xs text-red-600">{noteError}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setNoteDialog(null);
+                  setNoteText("");
                   setNoteError(null);
                 }}
-                placeholder="Reason or details"
-              />
-              {noteError && <div className="mt-1 text-xs text-rose-600">{noteError}</div>}
-              <div className="mt-2 flex justify-end gap-2">
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!noteText.trim()}
+                onClick={() => discardCandidateFromRole(noteDialog.roleId, noteDialog.candidateId)}
+                className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {pipeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-4xl">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">{pipeModal.title}</h3>
+                <p className="text-xs text-gray-600 font-mono">{pipeModal.roleCode}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={roleStatusFilter}
+                  onChange={(e) => setRoleStatusFilter(e.target.value as any)}
+                  className="px-2 py-1 text-xs border border-gray-300 rounded"
+                  title="Role Status"
+                >
+                  <option value="all">Role: All</option>
+                  <option value="active">Active</option>
+                  <option value="lost">Lost</option>
+                  <option value="deal">Deal</option>
+                  <option value="on_hold">On Hold</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="no_answer">No Answer</option>
+                </select>
                 <button
                   onClick={() => {
-                    setNoteDialog(null);
-                    setNoteText("");
-                    setNoteError(null);
+                    const roleId = pipeModal.roleId;
+                    const roleCode = pipeModal.roleCode;
+                    const bucket = dataByRole[roleId] || { under_consideration: [], rejected: [] };
+                    const rows = [...(bucket.under_consideration || []), ...(bucket.rejected || [])];
+                    const headers = [
+                      "role_code",
+                      "candidate_name",
+                      "recruiter_name",
+                      "recruiter_code",
+                      "rm_location",
+                      "rm_work_type",
+                      "rm_rate_bill",
+                      "score",
+                      "submission_date",
+                      "rm_validation_status",
+                      "association_status",
+                      "is_discarded"
+                    ];
+                    const csv = [headers.join(",")]
+                      .concat(
+                        rows.map((r) =>
+                          [
+                            roleCode,
+                            (r.candidate_name || "").replace(/,/g, " "),
+                            (r.recruiter_name || "").replace(/,/g, " "),
+                            (r.recruiter_code || "").replace(/,/g, " "),
+                            (r.rm_location || "").replace(/,/g, " "),
+                            (r.rm_work_type || "").replace(/,/g, " "),
+                            r.rm_rate_bill != null ? String(Number(r.rm_rate_bill)) : "",
+                            r.score != null ? String(Number(r.score)) : "",
+                            r.submission_date || "",
+                            (r.rm_validation_status || "").replace(/,/g, " "),
+                            r.association_status || "",
+                            String(r.is_discarded || 0)
+                          ].join(",")
+                        )
+                      )
+                      .join("\n");
+                    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `${roleCode}-pipeline.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
                   }}
-                  className="px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                  className="flex items-center gap-1 text-sm px-3 py-1 rounded border border-gray-200 text-gray-700 hover:bg-gray-50"
+                  title="Export CSV"
                 >
-                  Cancel
+                  <Download className="w-4 h-4" />
+                  Export
                 </button>
                 <button
-                  disabled={!noteText.trim()}
-                  onClick={() => discardCandidateFromRole(noteDialog.roleId, noteDialog.candidateId)}
-                  className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50"
+                  className="px-3 py-1 text-sm border border-gray-300 rounded"
+                  onClick={() => setPipeModal(null)}
                 >
-                  Confirm
+                  Close
                 </button>
               </div>
+            </div>
+            <div className="p-4">
+              {roleStatusFilter !== "all" && (pipeModal.status || "").toLowerCase() !== roleStatusFilter ? (
+                <div className="text-sm text-gray-600">
+                  Role status is {pipeModal.status}. Change filter to view candidates.
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4 flex items-center gap-3">
+                    <input
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Search candidates"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                    <select
+                      value={candidateStatusFilter}
+                      onChange={(e) => setCandidateStatusFilter(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      title="Filter by Candidate Status"
+                    >
+                      <option value="all">Filter: All</option>
+                      <option value="rm_evaluation">Pending Evaluation</option>
+                      <option value="client_submitted">Submitted to Client</option>
+                      <option value="client_rejected">Client Rejected</option>
+                      <option value="deal">Deal</option>
+                      <option value="discarded">Discarded</option>
+                    </select>
+                    <select
+                      value={sortKey}
+                      onChange={(e) => setSortKey(e.target.value as any)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    >
+                      <option value="recent">Sort: Recent</option>
+                      <option value="score">Sort: Score</option>
+                      <option value="location">Sort: Location</option>
+                      <option value="contract">Sort: Contract Type</option>
+                      <option value="payment">Sort: Payment</option>
+                    </select>
+                    <select
+                      value={sortOrder}
+                      onChange={(e) => setSortOrder(e.target.value as any)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    >
+                      <option value="desc">Order: Desc</option>
+                      <option value="asc">Order: Asc</option>
+                    </select>
+                  </div>
+                  <div className="overflow-x-auto max-h-[420px] overflow-y-auto relative">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50 sticky top-0 z-10">
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Candidate</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Location</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Payment</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Score (0–5)</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Contract Type</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Date Submitted</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">RM Status</th>
+                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Current Status</th>
+                          <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const roleId = pipeModal.roleId;
+                          const bucket = dataByRole[roleId] || { under_consideration: [], rejected: [] };
+                          const rows = [...(bucket.under_consideration || []), ...(bucket.rejected || [])];
+                          const term = searchTerm.trim().toLowerCase();
+                          const filteredByStatus = rows.filter((row) => {
+                            if (candidateStatusFilter === "all") return true;
+                            if (candidateStatusFilter === "discarded") return row.is_discarded === 1;
+                            return (row.association_status || "") === candidateStatusFilter && row.is_discarded !== 1;
+                          });
+                          const filtered = term
+                            ? filteredByStatus.filter((row) => {
+                                const c = (row.candidate_name || "").toLowerCase();
+                                const rec = `${row.recruiter_name || ""} ${row.recruiter_code || ""}`.toLowerCase();
+                                const loc = (row.rm_location || "").toLowerCase();
+                                return c.includes(term) || rec.includes(term) || loc.includes(term);
+                              })
+                            : filteredByStatus;
+                          const sorted = [...filtered].sort((a, b) => {
+                            if (sortKey === "score") {
+                              const sa = a.score != null ? Number(a.score) : -Infinity;
+                              const sb = b.score != null ? Number(b.score) : -Infinity;
+                              return sortOrder === "desc" ? sb - sa : sa - sb;
+                            }
+                            if (sortKey === "location") {
+                              const cmp = (a.rm_location || "").localeCompare(b.rm_location || "");
+                              return sortOrder === "desc" ? cmp : -cmp;
+                            }
+                            if (sortKey === "contract") {
+                              const cmp = (a.rm_work_type || "").localeCompare(b.rm_work_type || "");
+                              return sortOrder === "desc" ? cmp : -cmp;
+                            }
+                            if (sortKey === "payment") {
+                              const pa = a.rm_rate_bill != null ? Number(a.rm_rate_bill) : -Infinity;
+                              const pb = b.rm_rate_bill != null ? Number(b.rm_rate_bill) : -Infinity;
+                              return sortOrder === "desc" ? pb - pa : pa - pb;
+                            }
+                            const da = a.submission_date ? new Date(a.submission_date).getTime() : 0;
+                            const db = b.submission_date ? new Date(b.submission_date).getTime() : 0;
+                            return sortOrder === "desc" ? db - da : da - db;
+                          });
+                          return sorted.map((row) => (
+                            <tr id={`assoc-${row.association_id}`} key={row.association_id || `${row.candidate_id}-${row.submission_id || 0}`} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-2 px-3">
+                                <div className="font-medium text-gray-900">{row.candidate_name || "Unknown"}</div>
+                                <div className="text-xs text-gray-500">
+                                  {row.recruiter_name} · {row.recruiter_code}
+                                </div>
+                              </td>
+                              <td className="py-2 px-3 text-sm text-gray-700">{row.rm_location || "-"}</td>
+                              <td className="py-2 px-3 text-sm text-gray-700" title={`Contract: ${row.rm_work_type || "-"} • Unit: ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || '-'}`}>
+                                {formatPayment(row)}
+                              </td>
+                              <td className="py-2 px-3 text-sm text-gray-700">{row.score != null ? Number(row.score).toFixed(2) : "-"}</td>
+                              <td className="py-2 px-3 text-sm text-gray-700">{row.rm_work_type || "-"}</td>
+                              <td className="py-2 px-3 text-sm text-gray-700">{row.submission_date?.slice(0, 10) || "-"}</td>
+                              <td className="py-2 px-3 text-sm text-gray-700">{row.rm_validation_status || "-"}</td>
+                              <td className="py-2 px-3">
+                                <span className={`px-2 py-1 rounded text-xs border ${statusChipClass(row)}`} title={statusChipLabel(row)}>
+                                  {statusChipLabel(row)}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                {row.is_discarded !== 1 ? (
+                                  <div className="flex items-center justify-end gap-2">
+                                    {row.association_status === 'client_submitted' && (
+                                      <button
+                                        onClick={() => markDeal(pipeModal.roleId, row.candidate_id!)}
+                                        className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                      >
+                                        Mark Deal
+                                      </button>
+                                    )}
+                                    <button
+                                      className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                      onClick={() => setNoteDialog({ roleId: pipeModal.roleId, candidateId: row.candidate_id! })}
+                                    >
+                                      Discard
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-gray-400">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ));
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

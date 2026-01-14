@@ -64,7 +64,7 @@ app.get("/api/rm/pending-submissions-count", rmOnly, async (c) => {
 
     let where = `cra.status = 'rm_evaluation' AND cra.is_discarded = 0`;
     const filters: string[] = [];
-    if (teamIds.length > 0) filters.push(`r.team_id IN (${teamIds.join(",")})`);
+    if (teamIds.length > 0) filters.push(`(r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`);
     if (clientIds.length > 0) filters.push(`r.client_id IN (${clientIds.join(",")})`);
     if (filters.length > 0) where += ` AND (${filters.join(" OR ")})`;
 
@@ -115,9 +115,9 @@ app.get("/api/rm/pending-submissions", rmOnly, async (c) => {
 
     let filter = "";
     if (teamIds.length > 0 && clientIds.length > 0) {
-      filter = `AND (r.team_id IN (${teamIds.join(",")}) OR r.client_id IN (${clientIds.join(",")}))`;
+      filter = `AND ((r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")}))) OR r.client_id IN (${clientIds.join(",")}))`;
     } else if (teamIds.length > 0) {
-      filter = `AND r.team_id IN (${teamIds.join(",")})`;
+      filter = `AND (r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`;
     } else if (clientIds.length > 0) {
       filter = `AND r.client_id IN (${clientIds.join(",")})`;
     }
@@ -499,9 +499,9 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
 
     // Filter by RM's assigned teams and clients
     if (teamIds.length > 0 && clientIds.length > 0) {
-      query += ` AND (r.team_id IN (${teamIds.join(",")}) OR r.client_id IN (${clientIds.join(",")}))`;
+      query += ` AND ((r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")}))) OR r.client_id IN (${clientIds.join(",")}))`;
     } else if (teamIds.length > 0) {
-      query += ` AND r.team_id IN (${teamIds.join(",")})`;
+      query += ` AND (r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`;
     } else if (clientIds.length > 0) {
       query += ` AND r.client_id IN (${clientIds.join(",")})`;
     }
@@ -2243,8 +2243,15 @@ app.get("/api/rm/role-submissions/:roleId", rmOnly, async (c) => {
   if (!role) return c.json({ error: "Role not found" }, 404);
 
   const access = await db
-    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
-    .bind((rmUser as any).id, (role as any).team_id)
+    .prepare(`
+      SELECT 1 
+      FROM team_assignments 
+      WHERE user_id = ? AND (
+        team_id = ? OR team_id IN (SELECT team_id FROM am_role_teams WHERE role_id = ?)
+      )
+      LIMIT 1
+    `)
+    .bind((rmUser as any).id, (role as any).team_id, roleId)
     .first();
   if (!access) return c.json({ error: "Forbidden" }, 403);
 
@@ -2345,8 +2352,15 @@ app.put("/api/rm/submissions/:id/review", rmOnly, async (c) => {
   if (!sub) return c.json({ error: "Submission not found" }, 404);
 
   const access = await db
-    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
-    .bind((rmUser as any).id, (sub as any).team_id)
+    .prepare(`
+      SELECT 1 
+      FROM team_assignments 
+      WHERE user_id = ? AND (
+        team_id = ? OR team_id IN (SELECT team_id FROM am_role_teams WHERE role_id = ?)
+      )
+      LIMIT 1
+    `)
+    .bind((rmUser as any).id, (sub as any).team_id, (sub as any).role_id)
     .first();
   if (!access) return c.json({ error: "Forbidden" }, 403);
 
@@ -2398,8 +2412,15 @@ app.post("/api/rm/roles/:roleId/candidates/:candidateId/send-to-am", rmOnly, asy
   if (!role) return c.json({ error: "Role not found" }, 404);
 
   const access = await db
-    .prepare("SELECT 1 FROM team_assignments WHERE user_id = ? AND team_id = ?")
-    .bind((rmUser as any).id, (role as any).team_id)
+    .prepare(`
+      SELECT 1 
+      FROM team_assignments 
+      WHERE user_id = ? AND (
+        team_id = ? OR team_id IN (SELECT team_id FROM am_role_teams WHERE role_id = ?)
+      )
+      LIMIT 1
+    `)
+    .bind((rmUser as any).id, (role as any).team_id, roleId)
     .first();
   if (!access) return c.json({ error: "Forbidden" }, 403);
 
@@ -3116,9 +3137,43 @@ app.get("/api/rm/ledger/export", rmOnly, async (c) => {
       .bind((rmUser as any).id)
       .all();
     const clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).id);
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      const headers = ["Date", "Event", "Candidate", "Role", "RoleStatus", "Client", "Team", "SubmissionType", "InterviewLevel", "CVMatchPercent", "Notes"];
+      const csv = [headers.join(",")].join("\n");
+      if (formatParam === "excel") {
+        return new Response(csv, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.ms-excel;charset=utf-8",
+            "Content-Disposition": `attachment; filename="rm-submissions-ledger.xls"`
+          }
+        });
+      }
+      if (formatParam === "pdf") {
+        const tableHead = headers.map((h) => `<th style="padding:8px;border:1px solid #ddd;text-align:left;font-weight:600">${h}</th>`).join("");
+        const html = `<!doctype html><html><head><meta charset="utf-8"><title>RM Submissions Ledger</title><style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto;font-size:12px;color:#111;padding:16px} h2{margin:0 0 12px} table{border-collapse:collapse;width:100%}</style></head><body><h2>Recruitment Manager Submissions Ledger</h2><table><thead><tr>${tableHead}</tr></thead><tbody></tbody></table><script>window.onload=function(){window.print&&window.print();}</script></body></html>`;
+        return new Response(html, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Disposition": `inline; filename="rm-submissions-ledger.html"`
+          }
+        });
+      }
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv;charset=utf-8",
+          "Content-Disposition": `attachment; filename="rm-submissions-ledger.csv"`
+        }
+      });
+    }
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      return c.json({ events: [], total: 0 });
+    }
     let craWhere = "cra.is_discarded = 0";
     const filters: string[] = [];
-    if (teamIds.length > 0) filters.push(`r.team_id IN (${teamIds.join(",")})`);
+    if (teamIds.length > 0) filters.push(`(r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`);
     if (clientIds.length > 0) filters.push(`r.client_id IN (${clientIds.join(",")})`);
     if (filters.length > 0) craWhere += ` AND (${filters.join(" OR ")})`;
     let craDateClause = " AND ((cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?) OR (cra.status IN ('submitted','client_submitted','client_rejected') AND DATE(cra.updated_at) BETWEEN ? AND ?))";
@@ -3136,9 +3191,9 @@ app.get("/api/rm/ledger/export", rmOnly, async (c) => {
     let craSearchClause = "";
     let craSearchParams: any[] = [];
     if (search.length > 0) {
-      craSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      craSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR r.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      craSearchParams = [like, like, like, like];
+      craSearchParams = [like, like, like, like, like];
     }
     const craRows = eventType === "discarded"
       ? { results: [] }
@@ -3182,9 +3237,9 @@ app.get("/api/rm/ledger/export", rmOnly, async (c) => {
     let discardedSearchClause = "";
     let discardedSearchParams: any[] = [];
     if (search.length > 0) {
-      discardedSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      discardedSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR r.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      discardedSearchParams = [like, like, like, like];
+      discardedSearchParams = [like, like, like, like, like];
     }
     const discardedRows = await db
       .prepare(
@@ -3219,9 +3274,10 @@ app.get("/api/rm/ledger/export", rmOnly, async (c) => {
       .all();
     const rsBaseParams: any[] = [startDate, endDate];
     let rsWhere = "DATE(rs.submission_date) BETWEEN ? AND ?";
-    if (teamIds.length > 0) {
-      rsWhere += ` AND rs.team_id IN (${teamIds.join(",")})`;
-    }
+    const rsScopeFilters: string[] = [];
+    if (teamIds.length > 0) rsScopeFilters.push(`(ar.team_id IN (${teamIds.join(",")}) OR ar.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`);
+    if (clientIds.length > 0) rsScopeFilters.push(`ar.client_id IN (${clientIds.join(",")})`);
+    if (rsScopeFilters.length > 0) rsWhere += ` AND (${rsScopeFilters.join(" OR ")})`;
     let rsEventClause = " AND rs.entry_type IN ('interview','deal')";
     if (eventType && ["interview", "deal"].includes(eventType)) {
       rsEventClause = " AND rs.entry_type = ?";
@@ -3230,9 +3286,9 @@ app.get("/api/rm/ledger/export", rmOnly, async (c) => {
     let rsSearchClause = "";
     let rsSearchParams: any[] = [];
     if (search.length > 0) {
-      rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR ar.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      rsSearchParams = [like, like, like, like];
+      rsSearchParams = [like, like, like, like, like];
     }
     const rsRows = await db
       .prepare(
@@ -3270,9 +3326,9 @@ app.get("/api/rm/ledger/export", rmOnly, async (c) => {
     let dropoutSearchClause = "";
     let dropoutSearchParams: any[] = [];
     if (search.length > 0) {
-      dropoutSearchClause = " AND (ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      dropoutSearchClause = " AND (ar.title LIKE ? OR ar.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      dropoutSearchParams = [like, like, like];
+      dropoutSearchParams = [like, like, like, like];
     }
     const dropoutRows = await db
       .prepare(
@@ -3471,9 +3527,12 @@ app.get("/api/rm/ledger", rmOnly, async (c) => {
       .bind((rmUser as any).id)
       .all();
     const clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).id);
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      return c.json({ events: [], total: 0 });
+    }
     let craWhere = "cra.is_discarded = 0";
     const filters: string[] = [];
-    if (teamIds.length > 0) filters.push(`r.team_id IN (${teamIds.join(",")})`);
+    if (teamIds.length > 0) filters.push(`(r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`);
     if (clientIds.length > 0) filters.push(`r.client_id IN (${clientIds.join(",")})`);
     if (filters.length > 0) craWhere += ` AND (${filters.join(" OR ")})`;
     let craDateClause = " AND ((cra.status = 'rm_evaluation' AND DATE(cra.submission_date) BETWEEN ? AND ?) OR (cra.status IN ('submitted','client_submitted','client_rejected') AND DATE(cra.updated_at) BETWEEN ? AND ?))";
@@ -3491,9 +3550,9 @@ app.get("/api/rm/ledger", rmOnly, async (c) => {
     let craSearchClause = "";
     let craSearchParams: any[] = [];
     if (search.length > 0) {
-      craSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      craSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR r.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      craSearchParams = [like, like, like, like];
+      craSearchParams = [like, like, like, like, like];
     }
     const craRows = eventType === "discarded"
       ? { results: [] }
@@ -3537,9 +3596,9 @@ app.get("/api/rm/ledger", rmOnly, async (c) => {
     let discardedSearchClause = "";
     let discardedSearchParams: any[] = [];
     if (search.length > 0) {
-      discardedSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      discardedSearchClause = " AND (c.name LIKE ? OR r.title LIKE ? OR r.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      discardedSearchParams = [like, like, like, like];
+      discardedSearchParams = [like, like, like, like, like];
     }
     const discardedRows = await db
       .prepare(
@@ -3574,9 +3633,10 @@ app.get("/api/rm/ledger", rmOnly, async (c) => {
       .all();
     const rsBaseParams: any[] = [startDate, endDate];
     let rsWhere = "DATE(rs.submission_date) BETWEEN ? AND ?";
-    if (teamIds.length > 0) {
-      rsWhere += ` AND rs.team_id IN (${teamIds.join(",")})`;
-    }
+    const rsScopeFilters: string[] = [];
+    if (teamIds.length > 0) rsScopeFilters.push(`(ar.team_id IN (${teamIds.join(",")}) OR ar.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`);
+    if (clientIds.length > 0) rsScopeFilters.push(`ar.client_id IN (${clientIds.join(",")})`);
+    if (rsScopeFilters.length > 0) rsWhere += ` AND (${rsScopeFilters.join(" OR ")})`;
     let rsEventClause = " AND rs.entry_type IN ('interview','deal')";
     if (eventType && ["interview", "deal"].includes(eventType)) {
       rsEventClause = " AND rs.entry_type = ?";
@@ -3585,9 +3645,9 @@ app.get("/api/rm/ledger", rmOnly, async (c) => {
     let rsSearchClause = "";
     let rsSearchParams: any[] = [];
     if (search.length > 0) {
-      rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      rsSearchClause = " AND (rs.candidate_name LIKE ? OR ar.title LIKE ? OR ar.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      rsSearchParams = [like, like, like, like];
+      rsSearchParams = [like, like, like, like, like];
     }
     const rsRows = await db
       .prepare(
@@ -3620,9 +3680,9 @@ app.get("/api/rm/ledger", rmOnly, async (c) => {
     let dropoutSearchClause = "";
     let dropoutSearchParams: any[] = [];
     if (search.length > 0) {
-      dropoutSearchClause = " AND (ar.title LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
+      dropoutSearchClause = " AND (ar.title LIKE ? OR ar.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ?)";
       const like = `%${search}%`;
-      dropoutSearchParams = [like, like, like];
+      dropoutSearchParams = [like, like, like, like];
     }
     const dropoutRows = await db
       .prepare(
@@ -3720,31 +3780,31 @@ app.get("/api/rm/candidates", rmOnly, async (c) => {
       `)
       .bind((rmUser as any).id)
       .all();
-    const clientRows = await db
-      .prepare(`
-        SELECT c.id FROM clients c
-        INNER JOIN client_assignments ca ON c.id = ca.client_id
-        WHERE ca.user_id = ?
-      `)
-      .bind((rmUser as any).id)
-      .all();
-    const teamIds = (teamRows.results || []).map((t: any) => (t as any).id);
-    const clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).id);
-    const scopeFilters: string[] = [];
-    if (teamIds.length > 0) scopeFilters.push(`r.team_id IN (${teamIds.join(",")})`);
-    if (clientIds.length > 0) scopeFilters.push(`r.client_id IN (${clientIds.join(",")})`);
-    let where = "1=1";
-    if (scopeFilters.length > 0) where += ` AND (${scopeFilters.join(" OR ")})`;
-    const params: any[] = [];
-    if (search) {
-      where += " AND (c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)";
-      params.push(search, search, search);
-    }
-    const rows = await db
-      .prepare(
-        `
-        SELECT 
-          c.id as candidate_id,
+  const clientRows = await db
+    .prepare(`
+      SELECT c.id FROM clients c
+      INNER JOIN client_assignments ca ON c.id = ca.client_id
+      WHERE ca.user_id = ?
+    `)
+    .bind((rmUser as any).id)
+    .all();
+  const teamIds = (teamRows.results || []).map((t: any) => (t as any).id);
+  const clientIds = (clientRows.results || []).map((c2: any) => (c2 as any).id);
+  const scopeFilters: string[] = [];
+  if (teamIds.length > 0) scopeFilters.push(`(r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`);
+  if (clientIds.length > 0) scopeFilters.push(`r.client_id IN (${clientIds.join(",")})`);
+  let where = "1=1";
+  if (scopeFilters.length > 0) where += ` AND (${scopeFilters.join(" OR ")})`;
+  const params: any[] = [];
+  if (search) {
+    where += " AND (c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ? OR r.title LIKE ? OR r.role_code LIKE ?)";
+    params.push(search, search, search, search, search);
+  }
+  const rows = await db
+    .prepare(
+      `
+      SELECT 
+        c.id as candidate_id,
           c.name as candidate_name,
           c.candidate_code,
           c.email,
@@ -3752,15 +3812,15 @@ app.get("/api/rm/candidates", rmOnly, async (c) => {
           COUNT(DISTINCT cra.role_id) as total_roles,
           SUM(CASE WHEN cra.is_discarded = 0 THEN 1 ELSE 0 END) as in_play_roles,
           SUM(CASE WHEN cra.status = 'rm_evaluation' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as rm_evaluation,
-          SUM(CASE WHEN cra.status = 'submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as submitted,
-          SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_submitted,
-          SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected,
-          SUM(CASE WHEN cra.status = 'deal' THEN 1 ELSE 0 END) as deals,
-          DATE(MAX(COALESCE(cra.updated_at, cra.submission_date, cra.discarded_at))) as last_event_date
-        FROM candidate_role_associations cra
-        INNER JOIN candidates c ON c.id = cra.candidate_id
-        INNER JOIN am_roles r ON r.id = cra.role_id
-        WHERE ${where}
+        SUM(CASE WHEN cra.status = 'submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as submitted,
+        SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_submitted,
+        SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected,
+        SUM(CASE WHEN cra.status = 'deal' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as deals,
+        DATE(MAX(COALESCE(cra.updated_at, cra.submission_date, cra.discarded_at))) as last_event_date
+      FROM candidate_role_associations cra
+      INNER JOIN candidates c ON c.id = cra.candidate_id
+      INNER JOIN am_roles r ON r.id = cra.role_id
+      WHERE ${where}
         GROUP BY c.id, c.name, c.candidate_code, c.email, c.phone
         ORDER BY last_event_date DESC
         `
