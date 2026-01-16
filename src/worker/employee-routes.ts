@@ -25,6 +25,200 @@ const authenticatedUser = async (c: any, next: any) => {
   await next();
 };
 
+function toISODate(d: Date): string {
+  return d.toISOString().split("T")[0];
+}
+function getRangeForToken(token: string): { start?: string; end?: string } {
+  const now = new Date();
+  if (token.includes("today")) {
+    const s = toISODate(now);
+    return { start: s, end: s };
+  }
+  if (token.includes("this week")) {
+    const day = now.getDay();
+    const diffToMonday = (day + 6) % 7;
+    const start = new Date(now);
+    start.setDate(now.getDate() - diffToMonday);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return { start: toISODate(start), end: toISODate(end) };
+  }
+  if (token.includes("this month")) {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { start: toISODate(start), end: toISODate(end) };
+  }
+  if (token.includes("last month")) {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { start: toISODate(start), end: toISODate(end) };
+  }
+  if (token.includes("this year")) {
+    const start = new Date(now.getFullYear(), 0, 1);
+    const end = new Date(now.getFullYear(), 11, 31);
+    return { start: toISODate(start), end: toISODate(end) };
+  }
+  return {};
+}
+function parsePeriod(query: string, body: any): { start?: string; end?: string } {
+  const lower = (query || "").toLowerCase();
+  const explicit = (lower.match(/from\s+(\d{4}-\d{2}-\d{2})\s+(?:to|until)\s+(\d{4}-\d{2}-\d{2})/) || []);
+  if (explicit.length === 3) {
+    return { start: explicit[1], end: explicit[2] };
+  }
+  const t = getRangeForToken(lower);
+  if (t.start || t.end) return t;
+  if (body?.start_date && body?.end_date) {
+    return { start: body.start_date, end: body.end_date };
+  }
+  return {};
+}
+function parseIntent(query: string): "roles_on_hold" | "roles_worked_with" | "must_start" | "unknown" {
+  const lower = (query || "").toLowerCase();
+  if (lower.includes("on hold")) return "roles_on_hold";
+  if (lower.includes("worked with")) return "roles_worked_with";
+  if (lower.includes("must start") || lower.includes("should start")) return "must_start";
+  return "unknown";
+}
+async function countRolesOnHold(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  if (role === "admin") {
+    if (period.start && period.end) {
+      const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles WHERE status = 'on_hold' AND updated_at BETWEEN ? AND ?").bind(period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles WHERE status = 'on_hold'").first();
+    return (row as any)?.total || 0;
+  }
+  if (role === "account_manager") {
+    if (period.start && period.end) {
+      const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles WHERE account_manager_id = ? AND status = 'on_hold' AND updated_at BETWEEN ? AND ?").bind((user as any).id, period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles WHERE account_manager_id = ? AND status = 'on_hold'").bind((user as any).id).first();
+    return (row as any)?.total || 0;
+  }
+  if (role === "recruitment_manager") {
+    if (period.start && period.end) {
+      const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles r INNER JOIN client_assignments ca ON r.client_id = ca.client_id WHERE ca.user_id = ? AND r.status = 'on_hold' AND r.updated_at BETWEEN ? AND ?").bind((user as any).id, period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles r INNER JOIN client_assignments ca ON r.client_id = ca.client_id WHERE ca.user_id = ? AND r.status = 'on_hold'").bind((user as any).id).first();
+    return (row as any)?.total || 0;
+  }
+  if (role === "recruiter") {
+    if (period.start && period.end) {
+      const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles r INNER JOIN recruiter_client_assignments rca ON r.client_id = rca.client_id WHERE rca.recruiter_user_id = ? AND r.status = 'on_hold' AND r.updated_at BETWEEN ? AND ?").bind((user as any).id, period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles r INNER JOIN recruiter_client_assignments rca ON r.client_id = rca.client_id WHERE rca.recruiter_user_id = ? AND r.status = 'on_hold'").bind((user as any).id).first();
+    return (row as any)?.total || 0;
+  }
+  return 0;
+}
+async function countRolesWorkedWith(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  if (role === "recruiter") {
+    const base = "SELECT COUNT(DISTINCT role_id) as total FROM recruiter_submissions WHERE recruiter_user_id = ?";
+    if (period.start && period.end) {
+      const row = await db.prepare(base + " AND submission_date BETWEEN ? AND ?").bind((user as any).id, period.start, period.end).first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare(base).bind((user as any).id).first();
+    return (row as any)?.total || 0;
+  }
+  if (role === "account_manager") {
+    const base = "SELECT COUNT(*) as total FROM am_roles WHERE account_manager_id = ?";
+    if (period.start && period.end) {
+      const row = await db.prepare(base + " AND created_at BETWEEN ? AND ?").bind((user as any).id, period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare(base).bind((user as any).id).first();
+    return (row as any)?.total || 0;
+  }
+  if (role === "recruitment_manager") {
+    const base = "SELECT COUNT(*) as total FROM am_roles r INNER JOIN client_assignments ca ON r.client_id = ca.client_id WHERE ca.user_id = ?";
+    if (period.start && period.end) {
+      const row = await db.prepare(base + " AND r.created_at BETWEEN ? AND ?").bind((user as any).id, period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare(base).bind((user as any).id).first();
+    return (row as any)?.total || 0;
+  }
+  if (role === "admin") {
+    if (period.start && period.end) {
+      const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles WHERE created_at BETWEEN ? AND ?").bind(period.start, period.end + " 23:59:59").first();
+      return (row as any)?.total || 0;
+    }
+    const row = await db.prepare("SELECT COUNT(*) as total FROM am_roles").first();
+    return (row as any)?.total || 0;
+  }
+  return 0;
+}
+async function countMustStart(db: any, user: any) {
+  const role = (user as any).role as string;
+  if (role === "recruiter") {
+    const rows = await db.prepare(`
+      SELECT COUNT(*) as total
+      FROM am_roles r
+      INNER JOIN recruiter_client_assignments rca ON r.client_id = rca.client_id
+      WHERE rca.recruiter_user_id = ? AND r.status = 'active' AND r.id NOT IN (
+        SELECT DISTINCT role_id FROM recruiter_submissions WHERE recruiter_user_id = ?
+      )
+    `).bind((user as any).id, (user as any).id).first();
+    return (rows as any)?.total || 0;
+  }
+  if (role === "account_manager") {
+    const rows = await db.prepare(`
+      SELECT COUNT(*) as total
+      FROM am_roles r
+      WHERE r.account_manager_id = ? AND r.status = 'active' AND r.id NOT IN (
+        SELECT DISTINCT role_id FROM recruiter_submissions
+      )
+    `).bind((user as any).id).first();
+    return (rows as any)?.total || 0;
+  }
+  if (role === "recruitment_manager") {
+    const rows = await db.prepare(`
+      SELECT COUNT(*) as total
+      FROM am_roles r
+      INNER JOIN client_assignments ca ON r.client_id = ca.client_id
+      WHERE ca.user_id = ? AND r.status = 'active' AND r.id NOT IN (
+        SELECT DISTINCT role_id FROM recruiter_submissions
+      )
+    `).bind((user as any).id).first();
+    return (rows as any)?.total || 0;
+  }
+  return 0;
+}
+app.post("/api/reports/bot/query", authenticatedUser, async (c) => {
+  const db = c.env.DB;
+  const user = c.get("currentUser");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const query = String(body?.query || "");
+  const period = parsePeriod(query, body);
+  const intent = parseIntent(query);
+  if (intent === "unknown") {
+    return c.json({ success: false, error: "Unknown report question" }, 400);
+  }
+  if (intent === "roles_on_hold") {
+    const count = await countRolesOnHold(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "roles_worked_with") {
+    const count = await countRolesWorkedWith(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "must_start") {
+    const count = await countMustStart(db, user);
+    return c.json({ success: true, intent, answer: { count } });
+  }
+  return c.json({ success: false, error: "Unhandled intent" }, 400);
+});
+
 // Get employee profile visibility settings
 app.get("/api/employees/settings", authenticatedUser, async (c) => {
   const db = c.env.DB;

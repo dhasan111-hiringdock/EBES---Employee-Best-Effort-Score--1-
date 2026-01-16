@@ -91,6 +91,14 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
   return fetch(fullUrl, fetchOptions);
 }
 
+export async function reportBotQuery(query: string, startDate?: string, endDate?: string): Promise<Response> {
+  return fetchWithAuth(`/api/reports/bot/query`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, start_date: startDate, end_date: endDate }),
+  });
+}
+
 export async function rmReviewSubmission(submissionId: number, body: any): Promise<Response> {
   return fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
     method: 'PUT',
