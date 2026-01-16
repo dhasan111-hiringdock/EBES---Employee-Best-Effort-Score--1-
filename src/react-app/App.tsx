@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
 import ProtectedRoute from "@/react-app/components/ProtectedRoute";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 // Eager load Login page (needed immediately)
 import Login from "@/react-app/pages/Login";
@@ -88,6 +89,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
+      <SpeedInsights />
     </Router>
   );
 }
