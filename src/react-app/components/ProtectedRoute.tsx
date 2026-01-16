@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { Navigate } from 'react-router';
 import { useRequireAuth } from '@/react-app/hooks/useAuth';
 
 interface ProtectedRouteProps {
@@ -18,7 +19,7 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   }
 
   if (!user) {
-    return null;
+    return <Navigate to="/login" replace />;
   }
 
   return <>{children}</>;
