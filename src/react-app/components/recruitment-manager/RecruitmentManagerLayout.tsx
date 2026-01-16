@@ -4,6 +4,7 @@ import { LayoutDashboard, UserCircle, Target, LogOut, Users, BarChart3, Trending
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import ReportBotWidget from "@/react-app/components/shared/ReportBotWidget";
 
 interface RecruitmentManagerLayoutProps {
   children: ReactNode;
@@ -168,6 +169,7 @@ export default function RecruitmentManagerLayout({ children }: RecruitmentManage
           {children}
         </main>
       </div>
+      <ReportBotWidget />
     </div>
   );
 }

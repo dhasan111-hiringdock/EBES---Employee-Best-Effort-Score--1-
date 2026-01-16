@@ -4,6 +4,7 @@ import { useAuth } from "@/react-app/hooks/useAuth";
 import { useEffect, useState } from "react";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import ReportBotWidget from "@/react-app/components/shared/ReportBotWidget";
 
 interface RecruiterLayoutProps {
   children: React.ReactNode;
@@ -238,6 +239,7 @@ export default function RecruiterLayout({ children, selectedClient, onClientChan
           {children}
         </div>
       </main>
+      <ReportBotWidget />
     </div>
   );
 }

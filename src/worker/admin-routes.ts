@@ -1748,6 +1748,160 @@ app.post("/api/admin/master-reset", adminOnly, async (c) => {
   }
 });
 
+app.post("/api/admin/test/seed-bot-data", adminOnly, async (c) => {
+  const db = c.env.DB;
+  try {
+    const now = new Date().toISOString().split("T")[0];
+    const user = c.get("appUser");
+    const adminId = (user as any).id;
+
+    const clientRow = await db.prepare("SELECT id FROM clients WHERE is_active = 1 LIMIT 1").first();
+    const teamRow = await db.prepare("SELECT id FROM app_teams WHERE is_active = 1 LIMIT 1").first();
+    const amRow = await db.prepare("SELECT id FROM users WHERE role = 'account_manager' AND is_active = 1 LIMIT 1").first();
+    const recruiterRow = await db.prepare("SELECT id FROM users WHERE role = 'recruiter' AND is_active = 1 LIMIT 1").first();
+
+    if (!clientRow || !teamRow || !amRow || !recruiterRow) {
+      return c.json({ error: "Missing base data to seed" }, 400);
+    }
+
+    const clientId = (clientRow as any).id as number;
+    const teamId = (teamRow as any).id as number;
+    const amId = (amRow as any).id as number;
+    const recruiterId = (recruiterRow as any).id as number;
+
+    await db
+      .prepare("INSERT OR IGNORE INTO client_assignments (user_id, client_id, assigned_by_user_id) VALUES (?, ?, ?)")
+      .bind(amId, clientId, adminId)
+      .run();
+    await db
+      .prepare("INSERT OR IGNORE INTO recruiter_client_assignments (recruiter_user_id, client_id, team_id, assigned_by_user_id) VALUES (?, ?, ?, ?)")
+      .bind(recruiterId, clientId, teamId, adminId)
+      .run();
+    await db
+      .prepare("INSERT OR IGNORE INTO recruiter_team_assignments (team_id, recruiter_user_id, assigned_by_user_id, created_at) VALUES (?, ?, ?, datetime('now'))")
+      .bind(teamId, recruiterId, adminId)
+      .run();
+
+    const roleStmt = db.prepare(`
+      INSERT INTO am_roles (client_id, team_id, account_manager_id, title, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const statuses = ["active", "on_hold", "deal", "dropout"];
+    const titles = ["Senior Engineer", "Junior Engineer", "Team Lead", "Product Manager", "Designer"];
+    let insertedRoles = 0;
+    for (let i = 0; i < titles.length; i++) {
+      const status = statuses[i % statuses.length];
+      await roleStmt
+        .bind(
+          clientId,
+          teamId,
+          amId,
+          titles[i],
+          "Seeded role for bot testing",
+          status,
+          now,
+          now
+        )
+        .run();
+      insertedRoles++;
+    }
+
+    const rolesRows = await db
+      .prepare("SELECT id FROM am_roles WHERE client_id = ? AND team_id = ? ORDER BY id DESC LIMIT 5")
+      .bind(clientId, teamId)
+      .all();
+    const roles = (rolesRows.results || []) as any[];
+
+    const subStmt = db.prepare(`
+      INSERT INTO recruiter_submissions (
+        recruiter_user_id,
+        role_id,
+        client_id,
+        team_id,
+        entry_type,
+        submission_date,
+        candidate_name,
+        interview_level,
+        dropout_role_id,
+        dropout_reason,
+        cv_match_percent,
+        account_manager_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    let insertedSubs = 0;
+    for (const r of roles) {
+      const roleId = (r as any).id as number;
+      await subStmt
+        .bind(
+          recruiterId,
+          roleId,
+          clientId,
+          teamId,
+          "submission",
+          now,
+          "Seed Candidate " + roleId,
+          "L1",
+          null,
+          null,
+          75,
+          amId
+        )
+        .run();
+      insertedSubs++;
+      await subStmt
+        .bind(
+          recruiterId,
+          roleId,
+          clientId,
+          teamId,
+          "interview",
+          now,
+          "Seed Candidate " + roleId,
+          "L2",
+          null,
+          null,
+          80,
+          amId
+        )
+        .run();
+      insertedSubs++;
+      await subStmt
+        .bind(
+          recruiterId,
+          roleId,
+          clientId,
+          teamId,
+          "deal",
+          now,
+          "Seed Candidate " + roleId,
+          null,
+          null,
+          null,
+          90,
+          amId
+        )
+        .run();
+      insertedSubs++;
+    }
+
+    return c.json({ inserted_roles: insertedRoles, inserted_submissions: insertedSubs });
+  } catch (error) {
+    return c.json({ error: "Failed to seed bot data" }, 500);
+  }
+});
+
+app.post("/api/admin/test/clear-bot-data", adminOnly, async (c) => {
+  const db = c.env.DB;
+  try {
+    await db.prepare("DELETE FROM recruiter_submissions WHERE candidate_name LIKE 'Seed Candidate %'").run();
+    await db.prepare("DELETE FROM am_roles WHERE description = 'Seeded role for bot testing'").run();
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ error: "Failed to clear bot data" }, 500);
+  }
+});
+
 app.post("/api/system/master-reset", async (c) => {
   const db = c.env.DB;
   let body: any = {};

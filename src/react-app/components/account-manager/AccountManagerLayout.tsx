@@ -4,6 +4,7 @@ import { Building2, Users, RefreshCw, BarChart3, Briefcase, UserCircle, Target, 
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import ReportBotWidget from "@/react-app/components/shared/ReportBotWidget";
 
 interface Client {
   id: number;
@@ -241,6 +242,7 @@ export default function AccountManagerLayout({
           {children}
         </main>
       </div>
+      <ReportBotWidget />
     </div>
   );
 }

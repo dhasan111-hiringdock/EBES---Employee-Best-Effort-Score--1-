@@ -73,11 +73,37 @@ function parsePeriod(query: string, body: any): { start?: string; end?: string }
   }
   return {};
 }
-function parseIntent(query: string): "roles_on_hold" | "roles_worked_with" | "must_start" | "unknown" {
+function parseIntent(query: string):
+  | "roles_on_hold"
+  | "roles_worked_with"
+  | "must_start"
+  | "count_deals"
+  | "count_interviews"
+  | "count_dropouts"
+  | "count_submissions"
+  | "count_active_roles"
+  | "list_roles"
+  | "list_deals"
+  | "list_interviews"
+  | "list_submissions"
+  | "list_dropouts"
+  | "roles_search"
+  | "unknown" {
   const lower = (query || "").toLowerCase();
   if (lower.includes("on hold")) return "roles_on_hold";
   if (lower.includes("worked with")) return "roles_worked_with";
   if (lower.includes("must start") || lower.includes("should start")) return "must_start";
+  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("deal")) return "count_deals";
+  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("interview")) return "count_interviews";
+  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("dropout")) return "count_dropouts";
+  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("submission")) return "count_submissions";
+  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("active role")) return "count_active_roles";
+  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("role")) return "list_roles";
+  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("deal")) return "list_deals";
+  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("interview")) return "list_interviews";
+  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("submission")) return "list_submissions";
+  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("dropout")) return "list_dropouts";
+  if (lower.includes("search role") || lower.includes("find role") || lower.includes("search roles") || lower.includes("find roles")) return "roles_search";
   return "unknown";
 }
 async function countRolesOnHold(db: any, user: any, period: { start?: string; end?: string }) {
@@ -191,6 +217,207 @@ async function countMustStart(db: any, user: any) {
   }
   return 0;
 }
+async function countDeals(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  let base = "SELECT COUNT(*) as total FROM recruiter_submissions WHERE entry_type = 'deal'";
+  const params: any[] = [];
+  if (role === "recruiter") {
+    base += " AND recruiter_user_id = ?";
+    params.push((user as any).id);
+  }
+  if (role === "recruitment_manager") {
+    base += " AND recruiter_user_id IN (SELECT rta.recruiter_user_id FROM recruiter_team_assignments rta INNER JOIN team_assignments ta ON rta.team_id = ta.team_id WHERE ta.user_id = ?)";
+    params.push((user as any).id);
+  }
+  if (role === "account_manager") {
+    base += " AND account_manager_id = ?";
+    params.push((user as any).id);
+  }
+  if (period.start && period.end) {
+    base += " AND submission_date BETWEEN ? AND ?";
+    params.push(period.start, period.end);
+  }
+  const row = await db.prepare(base).bind(...params).first();
+  return (row as any)?.total || 0;
+}
+async function countInterviews(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  let base = "SELECT COUNT(*) as total FROM recruiter_submissions WHERE entry_type = 'interview'";
+  const params: any[] = [];
+  if (role === "recruiter") {
+    base += " AND recruiter_user_id = ?";
+    params.push((user as any).id);
+  }
+  if (role === "recruitment_manager") {
+    base += " AND recruiter_user_id IN (SELECT rta.recruiter_user_id FROM recruiter_team_assignments rta INNER JOIN team_assignments ta ON rta.team_id = ta.team_id WHERE ta.user_id = ?)";
+    params.push((user as any).id);
+  }
+  if (role === "account_manager") {
+    base += " AND account_manager_id = ?";
+    params.push((user as any).id);
+  }
+  if (period.start && period.end) {
+    base += " AND submission_date BETWEEN ? AND ?";
+    params.push(period.start, period.end);
+  }
+  const row = await db.prepare(base).bind(...params).first();
+  return (row as any)?.total || 0;
+}
+async function countDropouts(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  let base = "SELECT COUNT(*) as total FROM recruiter_submissions WHERE entry_type = 'dropout'";
+  const params: any[] = [];
+  if (role === "recruiter") {
+    base += " AND recruiter_user_id = ?";
+    params.push((user as any).id);
+  }
+  if (role === "recruitment_manager") {
+    base += " AND recruiter_user_id IN (SELECT rta.recruiter_user_id FROM recruiter_team_assignments rta INNER JOIN team_assignments ta ON rta.team_id = ta.team_id WHERE ta.user_id = ?)";
+    params.push((user as any).id);
+  }
+  if (role === "account_manager") {
+    base += " AND account_manager_id = ?";
+    params.push((user as any).id);
+  }
+  if (period.start && period.end) {
+    base += " AND submission_date BETWEEN ? AND ?";
+    params.push(period.start, period.end);
+  }
+  const row = await db.prepare(base).bind(...params).first();
+  return (row as any)?.total || 0;
+}
+async function countSubmissions(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  let base = "SELECT COUNT(*) as total FROM recruiter_submissions";
+  const params: any[] = [];
+  const filters: string[] = [];
+  if (role === "recruiter") {
+    filters.push("recruiter_user_id = ?");
+    params.push((user as any).id);
+  }
+  if (role === "recruitment_manager") {
+    filters.push("recruiter_user_id IN (SELECT rta.recruiter_user_id FROM recruiter_team_assignments rta INNER JOIN team_assignments ta ON rta.team_id = ta.team_id WHERE ta.user_id = ?)");
+    params.push((user as any).id);
+  }
+  if (role === "account_manager") {
+    filters.push("account_manager_id = ?");
+    params.push((user as any).id);
+  }
+  if (period.start && period.end) {
+    filters.push("submission_date BETWEEN ? AND ?");
+    params.push(period.start, period.end);
+  }
+  if (filters.length > 0) {
+    base += " WHERE " + filters.join(" AND ");
+  }
+  const row = await db.prepare(base).bind(...params).first();
+  return (row as any)?.total || 0;
+}
+async function countActiveRoles(db: any, user: any, period: { start?: string; end?: string }) {
+  const role = (user as any).role as string;
+  let base = "SELECT COUNT(*) as total FROM am_roles WHERE status = 'active'";
+  const params: any[] = [];
+  if (role === "recruiter") {
+    base += " AND client_id IN (SELECT client_id FROM recruiter_client_assignments WHERE recruiter_user_id = ?)";
+    params.push((user as any).id);
+  } else if (role === "recruitment_manager") {
+    base += " AND client_id IN (SELECT client_id FROM client_assignments WHERE user_id = ?)";
+    params.push((user as any).id);
+  } else if (role === "account_manager") {
+    base += " AND account_manager_id = ?";
+    params.push((user as any).id);
+  }
+  if (period.start && period.end) {
+    base += " AND updated_at BETWEEN ? AND ?";
+    params.push(period.start, period.end + " 23:59:59");
+  }
+  const row = await db.prepare(base).bind(...params).first();
+  return (row as any)?.total || 0;
+}
+async function listRoles(db: any, user: any, period: { start?: string; end?: string }, status?: string, search?: string) {
+  const role = (user as any).role as string;
+  const filters: string[] = [];
+  const params: any[] = [];
+  if (status) {
+    filters.push("r.status = ?");
+    params.push(status);
+  }
+  if (search) {
+    filters.push("LOWER(r.title) LIKE ?");
+    params.push(`%${search.toLowerCase()}%`);
+  }
+  if (period.start && period.end) {
+    filters.push("r.updated_at BETWEEN ? AND ?");
+    params.push(period.start, period.end + " 23:59:59");
+  }
+  if (role === "recruiter") {
+    filters.push("r.client_id IN (SELECT client_id FROM recruiter_client_assignments WHERE recruiter_user_id = ?)");
+    params.push((user as any).id);
+  } else if (role === "recruitment_manager") {
+    filters.push("r.client_id IN (SELECT client_id FROM client_assignments WHERE user_id = ?)");
+    params.push((user as any).id);
+  } else if (role === "account_manager") {
+    filters.push("r.account_manager_id = ?");
+    params.push((user as any).id);
+  }
+  const where = filters.length > 0 ? "WHERE " + filters.join(" AND ") : "";
+  const rows = await db
+    .prepare(`
+      SELECT r.id, r.title, r.role_code, r.status, r.updated_at, c.name as client_name, t.name as team_name
+      FROM am_roles r
+      INNER JOIN clients c ON r.client_id = c.id
+      INNER JOIN app_teams t ON r.team_id = t.id
+      ${where}
+      ORDER BY r.updated_at DESC
+      LIMIT 20
+    `)
+    .bind(...params)
+    .all();
+  const items = rows.results || [];
+  const columns = ["id", "title", "role_code", "status", "client_name", "team_name", "updated_at"];
+  return { items, columns };
+}
+async function listSubmissions(db: any, user: any, period: { start?: string; end?: string }, type?: string) {
+  const role = (user as any).role as string;
+  const filters: string[] = [];
+  const params: any[] = [];
+  if (type) {
+    filters.push("rs.entry_type = ?");
+    params.push(type);
+  }
+  if (period.start && period.end) {
+    filters.push("rs.submission_date BETWEEN ? AND ?");
+    params.push(period.start, period.end);
+  }
+  if (role === "recruiter") {
+    filters.push("rs.recruiter_user_id = ?");
+    params.push((user as any).id);
+  } else if (role === "recruitment_manager") {
+    filters.push("rs.recruiter_user_id IN (SELECT rta.recruiter_user_id FROM recruiter_team_assignments rta INNER JOIN team_assignments ta ON rta.team_id = ta.team_id WHERE ta.user_id = ?)");
+    params.push((user as any).id);
+  } else if (role === "account_manager") {
+    filters.push("rs.account_manager_id = ?");
+    params.push((user as any).id);
+  }
+  const where = filters.length > 0 ? "WHERE " + filters.join(" AND ") : "";
+  const rows = await db
+    .prepare(`
+      SELECT rs.id, rs.entry_type, rs.submission_date, rs.candidate_name, rs.interview_level, rs.cv_match_percent,
+             c.name as client_name, t.name as team_name, r.title as role_title, r.role_code
+      FROM recruiter_submissions rs
+      LEFT JOIN clients c ON rs.client_id = c.id
+      LEFT JOIN app_teams t ON rs.team_id = t.id
+      LEFT JOIN am_roles r ON rs.role_id = r.id
+      ${where}
+      ORDER BY rs.submission_date DESC
+      LIMIT 20
+    `)
+    .bind(...params)
+    .all();
+  const items = rows.results || [];
+  const columns = ["id", "entry_type", "submission_date", "candidate_name", "interview_level", "cv_match_percent", "client_name", "team_name", "role_title", "role_code"];
+  return { items, columns };
+}
 app.post("/api/reports/bot/query", authenticatedUser, async (c) => {
   const db = c.env.DB;
   const user = c.get("currentUser");
@@ -215,6 +442,53 @@ app.post("/api/reports/bot/query", authenticatedUser, async (c) => {
   if (intent === "must_start") {
     const count = await countMustStart(db, user);
     return c.json({ success: true, intent, answer: { count } });
+  }
+  if (intent === "count_deals") {
+    const count = await countDeals(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "count_interviews") {
+    const count = await countInterviews(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "count_dropouts") {
+    const count = await countDropouts(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "count_submissions") {
+    const count = await countSubmissions(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "count_active_roles") {
+    const count = await countActiveRoles(db, user, period);
+    return c.json({ success: true, intent, period, answer: { count } });
+  }
+  if (intent === "list_roles") {
+    const browse = await listRoles(db, user, period);
+    return c.json({ success: true, intent, period, answer: browse });
+  }
+  if (intent === "list_deals") {
+    const browse = await listSubmissions(db, user, period, "deal");
+    return c.json({ success: true, intent, period, answer: browse });
+  }
+  if (intent === "list_interviews") {
+    const browse = await listSubmissions(db, user, period, "interview");
+    return c.json({ success: true, intent, period, answer: browse });
+  }
+  if (intent === "list_submissions") {
+    const browse = await listSubmissions(db, user, period);
+    return c.json({ success: true, intent, period, answer: browse });
+  }
+  if (intent === "list_dropouts") {
+    const browse = await listSubmissions(db, user, period, "dropout");
+    return c.json({ success: true, intent, period, answer: browse });
+  }
+  if (intent === "roles_search") {
+    const lower = query.toLowerCase();
+    const m = lower.match(/roles?\s*(?:for|with|containing|like)?\s*([a-z0-9\s\-]+)/);
+    const term = m && m[1] ? m[1].trim() : "";
+    const browse = await listRoles(db, user, period, undefined, term || undefined);
+    return c.json({ success: true, intent, period, answer: browse });
   }
   return c.json({ success: false, error: "Unhandled intent" }, 400);
 });

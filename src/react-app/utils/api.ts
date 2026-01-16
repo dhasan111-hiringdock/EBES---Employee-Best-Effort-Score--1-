@@ -99,6 +99,18 @@ export async function reportBotQuery(query: string, startDate?: string, endDate?
   });
 }
 
+export async function seedBotData(): Promise<Response> {
+  return fetchWithAuth(`/api/admin/test/seed-bot-data`, {
+    method: 'POST'
+  });
+}
+
+export async function clearBotData(): Promise<Response> {
+  return fetchWithAuth(`/api/admin/test/clear-bot-data`, {
+    method: 'POST'
+  });
+}
+
 export async function rmReviewSubmission(submissionId: number, body: any): Promise<Response> {
   return fetchWithAuth(`/api/rm/submissions/${submissionId}/review`, {
     method: 'PUT',

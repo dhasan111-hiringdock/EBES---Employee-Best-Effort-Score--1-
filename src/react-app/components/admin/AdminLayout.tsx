@@ -4,6 +4,7 @@ import { Users, Building2, UsersRound, BarChart3, LogOut, TrendingUp, Settings }
 import { useAuth } from "@/react-app/hooks/useAuth";
 import NotificationBell from "@/react-app/components/shared/NotificationBell";
 import { fetchWithAuth } from "@/react-app/utils/api";
+import ReportBotWidget from "@/react-app/components/shared/ReportBotWidget";
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -100,6 +101,7 @@ export function AdminLayout({ children }: AdminLayoutProps) {
         </div>
         <div className="max-w-7xl mx-auto p-8">{children}</div>
       </div>
+      <ReportBotWidget />
     </div>
   );
 }

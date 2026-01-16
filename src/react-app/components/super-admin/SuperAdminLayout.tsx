@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { Building2, Users, LogOut, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '@/react-app/hooks/useAuth';
+import ReportBotWidget from '@/react-app/components/shared/ReportBotWidget';
 export default function SuperAdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -83,6 +84,7 @@ export default function SuperAdminLayout() {
       <div className="ml-72 p-8">
         <Outlet />
       </div>
+      <ReportBotWidget />
     </div>
   );
 }
