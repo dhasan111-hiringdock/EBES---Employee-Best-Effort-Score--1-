@@ -158,7 +158,7 @@ export default function ReportBotWidget() {
               <div className="text-xs text-slate-500">({roleLabel})</div>
             </div>
             <div className="flex items-center gap-2">
-              {user?.role === "admin" && (
+              {user?.role === "admin" && import.meta.env.DEV && (
                 <>
                   <button
                     onClick={async () => {

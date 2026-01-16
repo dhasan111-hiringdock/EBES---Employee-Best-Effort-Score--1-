@@ -1751,6 +1751,10 @@ app.post("/api/admin/master-reset", adminOnly, async (c) => {
 app.post("/api/admin/test/seed-bot-data", adminOnly, async (c) => {
   const db = c.env.DB;
   try {
+    const devAllowed = c.req.header("x-dev-allow") === "1";
+    if (!devAllowed) {
+      return c.json({ error: "Disabled in production" }, 403);
+    }
     const now = new Date().toISOString().split("T")[0];
     const user = c.get("appUser");
     const adminId = (user as any).id;
@@ -1894,6 +1898,10 @@ app.post("/api/admin/test/seed-bot-data", adminOnly, async (c) => {
 app.post("/api/admin/test/clear-bot-data", adminOnly, async (c) => {
   const db = c.env.DB;
   try {
+    const devAllowed = c.req.header("x-dev-allow") === "1";
+    if (!devAllowed) {
+      return c.json({ error: "Disabled in production" }, 403);
+    }
     await db.prepare("DELETE FROM recruiter_submissions WHERE candidate_name LIKE 'Seed Candidate %'").run();
     await db.prepare("DELETE FROM am_roles WHERE description = 'Seeded role for bot testing'").run();
     return c.json({ success: true });
@@ -1904,6 +1912,10 @@ app.post("/api/admin/test/clear-bot-data", adminOnly, async (c) => {
 
 app.post("/api/system/master-reset", async (c) => {
   const db = c.env.DB;
+  const devAllowed = c.req.header("x-dev-allow") === "1";
+  if (!devAllowed) {
+    return c.json({ error: "Disabled in production" }, 403);
+  }
   let body: any = {};
   try {
     body = await c.req.json();

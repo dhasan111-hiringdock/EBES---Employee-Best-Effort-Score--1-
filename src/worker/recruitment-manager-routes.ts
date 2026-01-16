@@ -2687,6 +2687,10 @@ app.get("/api/rm/reports/daily", rmOnly, async (c) => {
 app.post("/api/rm/seed/sample-data", rmOnly, async (c) => {
   const db = c.env.DB;
   const rmUser = c.get("rmUser");
+  const devAllowed = c.req.header("x-dev-allow") === "1";
+  if (!devAllowed) {
+    return c.json({ error: "Disabled in production" }, 403);
+  }
   let body: any = {};
   try {
     body = await c.req.json();
@@ -2874,6 +2878,10 @@ app.post("/api/rm/seed/sample-data", rmOnly, async (c) => {
 app.post("/api/rm/seed/reset-and-populate", rmOnly, async (c) => {
   const db = c.env.DB;
   const rmUser = c.get("rmUser");
+  const devAllowed = c.req.header("x-dev-allow") === "1";
+  if (!devAllowed) {
+    return c.json({ error: "Disabled in production" }, 403);
+  }
   let body: any = {};
   try {
     body = await c.req.json();

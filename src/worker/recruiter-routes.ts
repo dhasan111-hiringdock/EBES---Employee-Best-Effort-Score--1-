@@ -81,6 +81,10 @@ app.get("/api/recruiter/clients", recruiterOnly, async (c) => {
 app.post("/api/recruiter/seed/sample-data", recruiterOnly, async (c) => {
   const db = c.env.DB;
   const recruiterUser = c.get("recruiterUser");
+  const devAllowed = c.req.header("x-dev-allow") === "1";
+  if (!devAllowed) {
+    return c.json({ error: "Disabled in production" }, 403);
+  }
   let body: any = {};
   try {
     body = await c.req.json();

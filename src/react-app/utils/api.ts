@@ -101,13 +101,19 @@ export async function reportBotQuery(query: string, startDate?: string, endDate?
 
 export async function seedBotData(): Promise<Response> {
   return fetchWithAuth(`/api/admin/test/seed-bot-data`, {
-    method: 'POST'
+    method: 'POST',
+    headers: {
+      ...(import.meta.env.DEV ? { 'x-dev-allow': '1' } : {}),
+    }
   });
 }
 
 export async function clearBotData(): Promise<Response> {
   return fetchWithAuth(`/api/admin/test/clear-bot-data`, {
-    method: 'POST'
+    method: 'POST',
+    headers: {
+      ...(import.meta.env.DEV ? { 'x-dev-allow': '1' } : {}),
+    }
   });
 }
 
