@@ -1,4 +1,5 @@
 import { Link } from "react-router";
+import { useEffect, useState } from "react";
 import { BarChart3, Gauge, Clock, CheckCircle, ShieldCheck, Target, Users, Building2 } from "lucide-react";
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Brush, ComposedChart, Line, Area, Legend } from "recharts";
 
@@ -75,6 +76,13 @@ function HeroDashboardMock() {
 }
 
 export default function EBESLanding() {
+  const [apiStatus, setApiStatus] = useState<"loading" | "ok" | "fail">("loading");
+  useEffect(() => {
+    const base = (import.meta as any)?.env?.VITE_API_BASE_URL || (typeof window !== "undefined" && window.location && window.location.origin.includes("localhost") ? "http://localhost:8787" : "https://ebes-app.dhasan111.workers.dev");
+    fetch(`${base}/api/health`).then(res => {
+      setApiStatus(res.ok ? "ok" : "fail");
+    }).catch(() => setApiStatus("fail"));
+  }, []);
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 relative">
       <div
@@ -93,12 +101,17 @@ export default function EBESLanding() {
             </div>
             <span className="text-xl font-extrabold tracking-tight text-slate-900">EBES</span>
           </div>
-          <Link
-            to="/login"
-            className="px-4 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-          >
-            Login
-          </Link>
+          <div className="flex items-center gap-3">
+            <div className={`px-3 py-1 rounded-lg border text-xs font-medium ${apiStatus === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : apiStatus === "fail" ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-100 border-slate-200 text-slate-700"}`}>
+              {apiStatus === "loading" ? "Checking API..." : apiStatus === "ok" ? "API Connected" : "API Offline"}
+            </div>
+            <Link
+              to="/login"
+              className="px-4 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+            >
+              Login
+            </Link>
+          </div>
         </div>
       </header>
 

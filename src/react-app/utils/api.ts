@@ -4,6 +4,9 @@ const DEV_BASE = typeof window !== 'undefined' && window.location && window.loca
   : undefined;
 const LS_BASE = typeof window !== 'undefined' ? (localStorage.getItem('api_base') || undefined) : undefined;
 const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? LS_BASE ?? DEV_BASE ?? DEFAULT_API_BASE;
+export function getApiBase(): string {
+  return API_BASE;
+}
 const requestCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 5000; // 5 seconds cache for GET requests
 
@@ -89,6 +92,12 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
   }
 
   return fetch(fullUrl, fetchOptions);
+}
+
+export async function fetchPublic(url: string, options?: RequestInit): Promise<Response> {
+  const isAbsolute = url.startsWith('http://') || url.startsWith('https://');
+  const fullUrl = isAbsolute ? url : (API_BASE ? `${API_BASE}${url}` : url);
+  return fetch(fullUrl, options ?? {});
 }
 
 export async function reportBotQuery(query: string, startDate?: string, endDate?: string): Promise<Response> {

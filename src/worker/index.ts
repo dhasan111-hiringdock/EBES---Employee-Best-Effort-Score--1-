@@ -19,6 +19,16 @@ const app = new Hono<HonoContext>();
 // Enable CORS
 app.use("*", cors());
 
+app.get("/api/health", async (c) => {
+  const db = c.env.DB;
+  try {
+    await db.prepare("SELECT 1").first();
+    return c.json({ ok: true, ts: Date.now() });
+  } catch (e) {
+    return c.json({ ok: false, ts: Date.now() }, 500);
+  }
+});
+
 // Mount auth routes
 app.route("/", authRoutes);
 
