@@ -16,7 +16,7 @@
     "zod": "^3.24.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.12.0",
+    "@cloudflare/vite-plugin": "1.21.0",
     "@eslint/js": "9.25.1",
     "@getmocha/users-service": "^0.0.4",
     "@getmocha/vite-plugins": "latest",
@@ -34,7 +34,7 @@
     "typescript": "5.8.3",
     "typescript-eslint": "8.31.0",
     "vite": "^6.4.1",
-    "wrangler": "^4.33.0"
+    "wrangler": "4.59.2"
   },
   "scripts": {
     "build": "tsc -b && vite build",
