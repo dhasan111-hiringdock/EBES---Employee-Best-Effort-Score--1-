@@ -36,13 +36,18 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   
   const [entryType, setEntryType] = useState<EntryType>("deal");
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split("T")[0]);
   const [dropoutReason, setDropoutReason] = useState("");
-  const [roleCandidates, setRoleCandidates] = useState<Array<{ candidate_id: number; candidate_code: string; candidate_name: string; association_status: string }>>([]);
+  const [roleCandidates, setRoleCandidates] = useState<Array<{ association_id?: number; candidate_id: number; candidate_code: string; candidate_name: string; association_status: string; recruiter_name?: string; recruiter_code?: string }>>([]);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const [selectedAssociationId, setSelectedAssociationId] = useState<number | null>(null);
+  const [showInterviewsOnly, setShowInterviewsOnly] = useState(true);
+  const [showAllRecruiters, setShowAllRecruiters] = useState(true);
+  const [totalSubmissions, setTotalSubmissions] = useState<number>(0);
   
   // Dropdown role selection modal
   const [showDropoutModal, setShowDropoutModal] = useState(false);
@@ -77,19 +82,41 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
         return;
       }
       try {
-        const interviewed = entryType === "deal" ? "?interviewed_only=1" : "";
-        const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates${interviewed}`);
+        const interviewed = entryType === "deal" && showInterviewsOnly ? "interviewed_only=1" : "";
+        const scope = showAllRecruiters ? "scope=all" : "";
+        const qp = [interviewed, scope].filter(Boolean).join("&");
+        const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates${qp ? `?${qp}` : ""}`);
         if (resp.ok) {
           const data = await resp.json();
-          setRoleCandidates(data);
+          let list = data as Array<{ association_id?: number; candidate_id: number; candidate_code: string; candidate_name: string; association_status: string; recruiter_name?: string; recruiter_code?: string }>;
+          if (entryType === "deal" && showInterviewsOnly && Array.isArray(list) && list.length === 0) {
+            const rs = await fetchWithAuth(`/api/recruiter/role-submissions/${selectedRole.id}?scope=${showAllRecruiters ? "all" : ""}`);
+            if (rs.ok) {
+              const rsData = await rs.json();
+              const under = (rsData?.under_consideration || []) as Array<any>;
+              const eligible = under.filter((r) => r.is_discarded !== 1 && (Boolean(r.has_interview) || ['submitted','rm_evaluation','client_submitted'].includes(r.association_status)));
+              list = eligible.map((r) => ({
+                association_id: r.association_id,
+                candidate_id: r.candidate_id,
+                candidate_code: r.candidate_code || "",
+                candidate_name: r.candidate_name,
+                association_status: r.association_status || "",
+                recruiter_name: r.recruiter_name,
+                recruiter_code: r.recruiter_code,
+              }));
+              setTotalSubmissions(Number(rsData?.total_submissions || 0));
+            }
+          }
+          setRoleCandidates(list || []);
           setSelectedCandidateId(null);
+          setSelectedAssociationId(null);
         }
       } catch (e) {
         console.error("Failed to fetch role candidates:", e);
       }
     };
     fetchCandidates();
-  }, [selectedRole, entryType]);
+  }, [selectedRole, entryType, showInterviewsOnly, showAllRecruiters]);
 
   const handleSubmit = async () => {
     if (!selectedRole || !client) return;
@@ -98,23 +125,56 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
     setError(null);
     try {
       if (entryType === "deal") {
-        if (!selectedCandidateId) {
+        if (!selectedCandidateId && !selectedAssociationId) {
           setError("Please select a candidate for this role");
           return;
         }
-        const assocResp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates/${selectedCandidateId}/deal`, {
-          method: "POST",
-        });
-        if (!assocResp.ok) {
-          try {
-            const ct = assocResp.headers.get('content-type') || '';
-            const isJson = ct.includes('application/json');
-            const data = isJson ? await assocResp.json() : await assocResp.text();
-            setError((data as any)?.error || 'Failed to associate deal with candidate');
-          } catch {
-            setError('Failed to associate deal with candidate');
+        const selectedItem = roleCandidates.find((rc) =>
+          selectedAssociationId ? rc.association_id === selectedAssociationId : rc.candidate_id === selectedCandidateId
+        );
+        const needUpdateAssociation = !(selectedItem && selectedItem.association_status === 'deal');
+        if (needUpdateAssociation) {
+          let assocResp: Response | null = null;
+          if (selectedAssociationId) {
+            assocResp = await fetchWithAuth(`/api/recruiter/associations/${selectedAssociationId}/deal`, { method: "POST" });
+            if (!assocResp.ok && selectedCandidateId) {
+              const fallback = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates/${selectedCandidateId}/deal`, { method: "POST" });
+              if (!fallback.ok) {
+                try {
+                  const ct = fallback.headers.get('content-type') || '';
+                  const isJson = ct.includes('application/json');
+                  const data = isJson ? await fallback.json() : await fallback.text();
+                  setError((data as any)?.error || 'Failed to associate deal with candidate');
+                } catch {
+                  setError('Failed to associate deal with candidate');
+                }
+                return;
+              }
+            } else if (!assocResp.ok) {
+              try {
+                const ct = assocResp.headers.get('content-type') || '';
+                const isJson = ct.includes('application/json');
+                const data = isJson ? await assocResp.json() : await assocResp.text();
+                setError((data as any)?.error || 'Failed to associate deal with candidate');
+              } catch {
+                setError('Failed to associate deal with candidate');
+              }
+              return;
+            }
+          } else {
+            assocResp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates/${selectedCandidateId}/deal`, { method: "POST" });
+            if (!assocResp.ok) {
+              try {
+                const ct = assocResp.headers.get('content-type') || '';
+                const isJson = ct.includes('application/json');
+                const data = isJson ? await assocResp.json() : await assocResp.text();
+                setError((data as any)?.error || 'Failed to associate deal with candidate');
+              } catch {
+                setError('Failed to associate deal with candidate');
+              }
+              return;
+            }
           }
-          return;
         }
         // Submit deal entry
         const resp = await fetchWithAuth("/api/recruiter/submissions", {
@@ -139,6 +199,11 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
           }
           return;
         }
+        setSuccess('Deal recorded successfully');
+        setTimeout(() => {
+          onSuccess();
+          onClose();
+        }, 600);
       } else {
         // Submit dropout entry
         if (!selectedCandidateId) {
@@ -173,13 +238,21 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
             }
             return;
           }
+          setSuccess('Dropout recorded successfully');
+          setTimeout(() => {
+            onSuccess();
+            onClose();
+          }, 600);
         }
       }
 
-      onSuccess();
-      onClose();
     } catch (error) {
-      console.error("Failed to create entry:", error);
+      const msg = (error as any)?.message || 'An error occurred while submitting';
+      if (String(msg).toLowerCase().includes('no user') || String(msg).toLowerCase().includes('invalid session')) {
+        setError('Your session has expired. Please sign in again.');
+      } else {
+        setError('Failed to submit. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -223,6 +296,11 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
               {error && (
                 <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3">
                   {error}
+                </div>
+              )}
+              {success && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-4 py-3">
+                  {success}
                 </div>
               )}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -376,22 +454,60 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                                 <label className="block text-sm font-medium text-slate-700 mb-2">
                                   Select Candidate *
                                 </label>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <input
+                                    id="showInterviewsOnly"
+                                    type="checkbox"
+                                    checked={showInterviewsOnly}
+                                    onChange={(e) => setShowInterviewsOnly(e.target.checked)}
+                                  />
+                                  <label htmlFor="showInterviewsOnly" className="text-xs text-slate-600">
+                                    Only show candidates with interview or submission
+                                  </label>
+                                </div>
+                                <div className="flex items-center gap-2 mb-2">
+                                  <input
+                                    id="showAllRecruiters"
+                                    type="checkbox"
+                                    checked={showAllRecruiters}
+                                    onChange={(e) => setShowAllRecruiters(e.target.checked)}
+                                  />
+                                  <label htmlFor="showAllRecruiters" className="text-xs text-slate-600">
+                                    Show candidates from all recruiters
+                                  </label>
+                                </div>
                                 {roleCandidates.length > 0 ? (
                                   <select
-                                    value={selectedCandidateId ?? ""}
-                                    onChange={(e) => setSelectedCandidateId(e.target.value ? parseInt(e.target.value) : null)}
+                                    value={(showAllRecruiters ? selectedAssociationId : selectedCandidateId) ?? ""}
+                                    onChange={(e) => {
+                                      const val = e.target.value ? parseInt(e.target.value) : null;
+                                      if (showAllRecruiters) {
+                                        setSelectedAssociationId(val);
+                                        const item = roleCandidates.find(rc => rc.association_id === val);
+                                        setSelectedCandidateId(item ? item.candidate_id : null);
+                                      } else {
+                                        setSelectedCandidateId(val);
+                                        setSelectedAssociationId(null);
+                                      }
+                                    }}
                                     className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                                   >
                                     <option value="" disabled>Select a candidate</option>
-                                    {roleCandidates.map((c) => (
-                                      <option key={c.candidate_id} value={c.candidate_id}>
-                                        {c.candidate_name} ({c.candidate_code}) • {c.association_status}
-                                      </option>
-                                    ))}
+                                    {roleCandidates.map((c) => {
+                                      const value = showAllRecruiters ? c.association_id! : c.candidate_id;
+                                      const recruiterInfo = c.recruiter_name ? ` • ${c.recruiter_name}` : "";
+                                      return (
+                                        <option key={value} value={value}>
+                                          {c.candidate_name}{c.candidate_code ? ` (${c.candidate_code})` : ""}{recruiterInfo} • {c.association_status}
+                                        </option>
+                                      );
+                                    })}
                                   </select>
                                 ) : (
                                   <div className="text-sm text-slate-500">
-                                    No associated candidates found for this role
+                                    {totalSubmissions === 0
+                                      ? "No submissions yet for this role. We'll notify you when your recruiter submits."
+                                      : `No ${showInterviewsOnly ? "interviewed " : ""}associated candidates found for this role`}
                                   </div>
                                 )}
                               </div>
@@ -519,14 +635,14 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={submitting || !selectedRole || !selectedCandidateId || (entryType === "dropout" && !dropoutReason.trim())}
+                  disabled={submitting || !!success || !selectedRole || ((entryType === "deal") ? (!selectedCandidateId && !selectedAssociationId) : (!selectedCandidateId || !dropoutReason.trim()))}
                   className={`flex-1 px-6 py-3 ${
                     entryType === "deal"
                       ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
                       : "bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700"
                   } text-white rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg`}
                 >
-                  {submitting ? "Submitting..." : `Submit ${entryType === "deal" ? "Deal" : "Dropout"}`}
+                  {submitting ? "Submitting..." : success ? "Success" : `Submit ${entryType === "deal" ? "Deal" : "Dropout"}`}
                 </button>
               </div>
             </div>

@@ -1,6 +1,6 @@
 const DEFAULT_API_BASE = 'https://ebes-app.dhasan111.workers.dev';
-const DEV_BASE = typeof window !== 'undefined' && window.location && window.location.origin.includes('localhost')
-  ? 'http://localhost:8787'
+const DEV_BASE = typeof window !== 'undefined' && window.location && (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1'))
+  ? 'http://127.0.0.1:8787'
   : undefined;
 const LS_BASE = typeof window !== 'undefined' ? (localStorage.getItem('api_base') || undefined) : undefined;
 const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? LS_BASE ?? DEV_BASE ?? DEFAULT_API_BASE;

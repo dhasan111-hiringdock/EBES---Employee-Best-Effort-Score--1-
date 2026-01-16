@@ -2,6 +2,7 @@ import { Link } from "react-router";
 import { useEffect, useState } from "react";
 import { BarChart3, Gauge, Clock, CheckCircle, ShieldCheck, Target, Users, Building2 } from "lucide-react";
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Brush, ComposedChart, Line, Area, Legend } from "recharts";
+import { fetchPublic } from "@/react-app/utils/api";
 
 const submissionQuality = [
   { name: "Screening", value: 45 },
@@ -78,10 +79,22 @@ function HeroDashboardMock() {
 export default function EBESLanding() {
   const [apiStatus, setApiStatus] = useState<"loading" | "ok" | "fail">("loading");
   useEffect(() => {
-    const base = (import.meta as any)?.env?.VITE_API_BASE_URL || (typeof window !== "undefined" && window.location && window.location.origin.includes("localhost") ? "http://localhost:8787" : "https://ebes-app.dhasan111.workers.dev");
-    fetch(`${base}/api/health`).then(res => {
-      setApiStatus(res.ok ? "ok" : "fail");
-    }).catch(() => setApiStatus("fail"));
+    const check = async () => {
+      try {
+        const res = await fetchPublic(`/api/health`);
+        if (res.ok) {
+          setApiStatus("ok");
+          return;
+        }
+      } catch {}
+      try {
+        const res2 = await fetch(`https://ebes-app.dhasan111.workers.dev/api/health`);
+        setApiStatus(res2.ok ? "ok" : "fail");
+      } catch {
+        setApiStatus("fail");
+      }
+    };
+    check();
   }, []);
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-slate-50 relative">
