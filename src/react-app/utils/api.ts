@@ -233,3 +233,11 @@ export async function recruiterSeedSampleData(perRole?: number, clientId?: numbe
     }),
   });
 }
+
+export async function rmUpdateRoleStatus(roleId: number, status: string): Promise<Response> {
+  return fetchWithAuth(`/api/rm/roles/${roleId}/status`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}

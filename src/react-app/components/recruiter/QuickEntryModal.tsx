@@ -77,7 +77,8 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
         return;
       }
       try {
-        const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates`);
+        const interviewed = entryType === "deal" ? "?interviewed_only=1" : "";
+        const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates${interviewed}`);
         if (resp.ok) {
           const data = await resp.json();
           setRoleCandidates(data);
@@ -88,7 +89,7 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
       }
     };
     fetchCandidates();
-  }, [selectedRole]);
+  }, [selectedRole, entryType]);
 
   const handleSubmit = async () => {
     if (!selectedRole || !client) return;

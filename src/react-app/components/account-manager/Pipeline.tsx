@@ -50,10 +50,16 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   const [sortKey, setSortKey] = useState<"recent" | "score" | "location" | "contract" | "payment">("recent");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [candidateStatusFilter, setCandidateStatusFilter] = useState<string>("all");
-  const [noteDialog, setNoteDialog] = useState<{ roleId: number; candidateId: number; type: 'discard' | 'client_reject'; submissionId?: number } | null>(null);
+  const [noteDialog, setNoteDialog] = useState<{ roleId: number; candidateId: number; type: 'discard' | 'client_reject' | 'submit_client'; submissionId?: number } | null>(null);
   const [noteText, setNoteText] = useState<string>("");
   const [noteError, setNoteError] = useState<string | null>(null);
   const quickReasons = useMemo(() => ["Not a fit", "Client budget", "Timeline mismatch", "Skills mismatch", "Not available"], []);
+  interface Client { id: number; name: string; client_code: string; }
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<number>(clientId);
+  interface Team { id: number; name: string; team_code: string; }
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<number>(teamId);
 
   const formatPayment = (row: RoleSubmission) => {
     if (row.rm_rate_bill == null) return "-";
@@ -83,8 +89,8 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
       try {
         const params = new URLSearchParams({
           status: selectedStatus,
-          client_id: String(clientId),
-          team_id: String(teamId),
+          client_id: String(selectedClientId || clientId),
+          team_id: String(selectedTeamId || teamId),
         });
         const res = await fetchWithAuth(`/api/am/roles?${params}`);
         if (!res.ok) return;
@@ -110,7 +116,20 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
       }
     };
     load();
-  }, [clientId, teamId, selectedStatus]);
+  }, [selectedClientId, selectedTeamId, selectedStatus]);
+
+  useEffect(() => {
+    const loadAssignments = async () => {
+      try {
+        const res = await fetchWithAuth("/api/am/assignments");
+        if (!res.ok) return;
+        const data = await res.json();
+        setClients(data.clients || []);
+        setTeams(data.teams || []);
+      } catch {}
+    };
+    loadAssignments();
+  }, []);
 
   const totals = useMemo(() => {
     let submittedToClient = 0;
@@ -182,16 +201,6 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
     URL.revokeObjectURL(url);
   };
 
-  const submitToClient = async (roleId: number, candidateId: number) => {
-    const res = await amSubmitCandidateToClient(roleId, candidateId);
-    if (res.ok) {
-      const r = await getAmRoleSubmissions(roleId);
-      if (r.ok) {
-        const payload = await r.json();
-        setDataByRole((prev) => ({ ...prev, [roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
-      }
-    }
-  };
 
   const markDeal = async (roleId: number, candidateId: number) => {
     const res = await amMarkDeal(roleId, candidateId);
@@ -207,11 +216,11 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   const handleConfirmNote = async () => {
     const dlg = noteDialog;
     if (!dlg) return;
-    if (!noteText.trim()) {
-      setNoteError("Please add a note");
-      return;
-    }
     if (dlg.type === 'discard') {
+      if (!noteText.trim()) {
+        setNoteError("Please add a note");
+        return;
+      }
       const res = await amDiscardCandidate(dlg.roleId, dlg.candidateId, noteText || undefined);
       if (res.ok) {
         const r = await getAmRoleSubmissions(dlg.roleId);
@@ -220,11 +229,27 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
           setDataByRole((prev) => ({ ...prev, [dlg.roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
         }
       }
-    } else {
+    } else if (dlg.type === 'client_reject') {
+      if (!noteText.trim()) {
+        setNoteError("Please add a note");
+        return;
+      }
       const res = await amClientRejectCandidate(dlg.roleId, dlg.candidateId);
       if (res.ok) {
         if (dlg.submissionId) {
           await amReviewSubmission(dlg.submissionId, { am_notes: noteText || '' });
+        }
+        const r = await getAmRoleSubmissions(dlg.roleId);
+        if (r.ok) {
+          const payload = await r.json();
+          setDataByRole((prev) => ({ ...prev, [dlg.roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
+        }
+      }
+    } else if (dlg.type === 'submit_client') {
+      const res = await amSubmitCandidateToClient(dlg.roleId, dlg.candidateId);
+      if (res.ok) {
+        if ((dlg.submissionId ?? 0) > 0 && noteText.trim().length > 0) {
+          await amReviewSubmission(dlg.submissionId!, { am_notes: noteText.trim() });
         }
         const r = await getAmRoleSubmissions(dlg.roleId);
         if (r.ok) {
@@ -286,6 +311,38 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
           </div>
         </div>
         <div className="w-full md:w-64">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Client</label>
+          <select
+            value={String(selectedClientId)}
+            onChange={(e) => setSelectedClientId(Number(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3"
+          >
+            {clients.length === 0 ? (
+              <option value={String(clientId)}>Loading…</option>
+            ) : (
+              clients.map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.name}
+                </option>
+              ))
+            )}
+          </select>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Team</label>
+          <select
+            value={String(selectedTeamId)}
+            onChange={(e) => setSelectedTeamId(Number(e.target.value))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3"
+          >
+            {teams.length === 0 ? (
+              <option value={String(teamId)}>Loading…</option>
+            ) : (
+              teams.map((t) => (
+                <option key={t.id} value={String(t.id)}>
+                  {t.name}
+                </option>
+              ))
+            )}
+          </select>
           <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Role Status</label>
           <select
             value={selectedStatus}
@@ -447,10 +504,10 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
                                     onClick={() => {
                                       setOpenMenuFor(null);
-                                      submitToClient(role.id, row.candidate_id!);
+                                      setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'submit_client', submissionId: row.submission_id });
                                     }}
                                   >
-                                    Submitted to Client
+                                    Submit to Client
                                   </button>
                                   <button
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
@@ -508,7 +565,9 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
       {noteDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
           <div className="bg-white rounded-xl border border-gray-200 shadow-lg w-full max-w-md p-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">{noteDialog.type === 'discard' ? 'Discard Candidate' : 'Client Rejected'}</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {noteDialog.type === 'discard' ? 'Discard Candidate' : noteDialog.type === 'client_reject' ? 'Client Rejected' : 'Submit to Client'}
+            </h3>
             <p className="text-sm text-gray-600 mb-3">Add a note</p>
             <div className="flex flex-wrap gap-2 mb-3">
               {quickReasons.map((r) => (
@@ -532,7 +591,13 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
             {noteError && <div className="mt-2 text-xs text-red-600">{noteError}</div>}
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => { setNoteDialog(null); setNoteText(""); setNoteError(null); }} className="px-3 py-2 text-sm border border-gray-200 rounded-lg">Cancel</button>
-              <button disabled={!noteText.trim()} onClick={handleConfirmNote} className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50">Confirm</button>
+              <button
+                disabled={noteDialog.type !== 'submit_client' && !noteText.trim()}
+                onClick={handleConfirmNote}
+                className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg disabled:opacity-50"
+              >
+                Confirm
+              </button>
             </div>
           </div>
         </div>

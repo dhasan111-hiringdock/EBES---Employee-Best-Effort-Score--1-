@@ -516,22 +516,37 @@ app.get("/api/recruiter/roles/:roleId/candidates", recruiterOnly, async (c) => {
   const db = c.env.DB;
   const recruiterUser = c.get("recruiterUser");
   const roleId = c.req.param("roleId");
+  const interviewedOnly = c.req.query("interviewed_only") === "1";
 
   try {
-    const { results } = await db
-      .prepare(`
-        SELECT 
-          c.id as candidate_id,
-          c.candidate_code,
-          c.name as candidate_name,
-          cra.status as association_status
-        FROM candidate_role_associations cra
-        INNER JOIN candidates c ON c.id = cra.candidate_id
-        WHERE cra.role_id = ? AND cra.recruiter_user_id = ? AND cra.is_discarded = 0
-        ORDER BY c.name ASC
-      `)
-      .bind(roleId, (recruiterUser as any).id)
-      .all();
+    let query = `
+      SELECT 
+        c.id as candidate_id,
+        c.candidate_code,
+        c.name as candidate_name,
+        cra.status as association_status
+      FROM candidate_role_associations cra
+      INNER JOIN candidates c ON c.id = cra.candidate_id
+      WHERE cra.role_id = ? AND cra.recruiter_user_id = ? AND cra.is_discarded = 0
+    `;
+    const params: any[] = [roleId, (recruiterUser as any).id];
+
+    if (interviewedOnly) {
+      query += `
+        AND EXISTS (
+          SELECT 1 
+          FROM recruiter_submissions rs
+          WHERE rs.role_id = cra.role_id
+            AND rs.recruiter_user_id = cra.recruiter_user_id
+            AND rs.entry_type = 'interview'
+            AND rs.candidate_name = c.name
+        )
+      `;
+    }
+
+    query += ` ORDER BY c.name ASC`;
+
+    const { results } = await db.prepare(query).bind(...params).all();
 
     return c.json(results || []);
   } catch (error) {
@@ -567,7 +582,15 @@ app.get("/api/recruiter/role-submissions/:roleId", recruiterOnly, async (c) => {
         rs.rm_rate_bill,
         rs.rm_rate_pay,
         rs.rm_location,
-        rs.rm_work_type
+        rs.rm_work_type,
+        EXISTS (
+          SELECT 1 
+          FROM recruiter_submissions rs2
+          WHERE rs2.role_id = cra.role_id
+            AND rs2.recruiter_user_id = cra.recruiter_user_id
+            AND rs2.entry_type = 'interview'
+            AND rs2.candidate_name = c.name
+        ) as has_interview
       FROM candidate_role_associations cra
       LEFT JOIN candidates c ON cra.candidate_id = c.id
       LEFT JOIN users u ON cra.recruiter_user_id = u.id
@@ -609,6 +632,28 @@ app.post("/api/recruiter/roles/:roleId/candidates/:candidateId/deal", recruiterO
       .first();
     if (!assoc) {
       return c.json({ error: "Association not found" }, 404);
+    }
+
+    const candidateRow = await db
+      .prepare(`SELECT name FROM candidates WHERE id = ?`)
+      .bind(candidateId)
+      .first();
+    const candidateName = candidateRow ? (candidateRow as any).name : null;
+    if (!candidateName) {
+      return c.json({ error: "Candidate not found" }, 404);
+    }
+
+    const hasInterview = await db
+      .prepare(`
+        SELECT 1
+        FROM recruiter_submissions
+        WHERE role_id = ? AND recruiter_user_id = ? AND entry_type = 'interview' AND candidate_name = ?
+        LIMIT 1
+      `)
+      .bind(roleId, (recruiterUser as any).id, candidateName)
+      .first();
+    if (!hasInterview) {
+      return c.json({ error: "Interview required before marking deal" }, 400);
     }
 
     await db

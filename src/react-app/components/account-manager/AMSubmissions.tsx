@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchWithAuth, amSubmitCandidateToClient, amDiscardCandidate } from "@/react-app/utils/api";
+import { fetchWithAuth, amSubmitCandidateToClient, amDiscardCandidate, getAmRoleSubmissions, amReviewSubmission } from "@/react-app/utils/api";
 import { CheckCircle2, XCircle } from "lucide-react";
 
 interface PendingSubmission {
@@ -20,6 +20,9 @@ export default function AMSubmissions() {
   const [error, setError] = useState<string | null>(null);
   const [discardReason, setDiscardReason] = useState("");
   const [workingKey, setWorkingKey] = useState<string | null>(null);
+  const [noteDialog, setNoteDialog] = useState<{ roleId: number; candidateId: number } | null>(null);
+  const [noteText, setNoteText] = useState<string>("");
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -43,18 +46,42 @@ export default function AMSubmissions() {
   };
 
   const accept = async (i: PendingSubmission) => {
-    setWorkingKey(keyOf(i));
+    setNoteDialog({ roleId: i.role_id, candidateId: i.candidate_id });
+  };
+
+  const confirmSubmitWithNote = async () => {
+    const dlg = noteDialog;
+    if (!dlg) return;
+    const k = `${dlg.roleId}:${dlg.candidateId}`;
+    setWorkingKey(k);
     try {
-      const res = await amSubmitCandidateToClient(i.role_id, i.candidate_id);
+      const res = await amSubmitCandidateToClient(dlg.roleId, dlg.candidateId);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j?.error || "Submit to client failed");
       }
-      setItems((prev) => prev.filter((x) => keyOf(x) !== keyOf(i)));
+      if (noteText.trim().length > 0) {
+        const r = await getAmRoleSubmissions(dlg.roleId);
+        if (r.ok) {
+          const payload = await r.json();
+          const rows: any[] = [
+            ...(payload?.under_consideration || []),
+            ...(payload?.rejected || []),
+          ];
+          const match = rows.find((row) => row?.candidate_id === dlg.candidateId && (row?.submission_id ?? 0) > 0);
+          if (match && match.submission_id) {
+            await amReviewSubmission(Number(match.submission_id), { am_notes: noteText.trim() });
+          }
+        }
+      }
+      setItems((prev) => prev.filter((x) => `${x.role_id}:${x.candidate_id}` !== k));
     } catch (e: any) {
-      alert(e?.message || "Failed to accept");
+      alert(e?.message || "Failed to submit");
     } finally {
       setWorkingKey(null);
+      setNoteDialog(null);
+      setNoteText("");
+      setNoteError(null);
     }
   };
 
@@ -174,6 +201,37 @@ export default function AMSubmissions() {
               </div>
             );
           })}
+        </div>
+      )}
+      {noteDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-lg w-full max-w-md p-4">
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Submit to Client</h3>
+            <p className="text-sm text-slate-600 mb-3">Add a note (optional)</p>
+            <textarea
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              rows={4}
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Note for context"
+            />
+            {noteError && <div className="mt-2 text-xs text-red-600">{noteError}</div>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setNoteDialog(null); setNoteText(""); setNoteError(null); }}
+                className="px-3 py-2 text-sm border border-slate-200 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSubmitWithNote}
+                className="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg"
+                disabled={workingKey != null}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

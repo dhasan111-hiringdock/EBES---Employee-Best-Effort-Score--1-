@@ -397,6 +397,45 @@ app.get("/api/rm/account-managers", rmOnly, async (c) => {
   }
 });
 
+// Update role status (RM)
+app.put("/api/rm/roles/:id/status", rmOnly, async (c) => {
+  const db = c.env.DB;
+  const rmUser = c.get("rmUser");
+  const roleId = c.req.param("id");
+  const body = await c.req.json();
+  const status = (body?.status || "").toString();
+  const allowed = ["active", "lost", "cancelled", "on_hold", "no_answer", "deal"];
+  if (!allowed.includes(status)) {
+    return c.json({ error: "Invalid status" }, 400);
+  }
+  const role = await db
+    .prepare("SELECT team_id FROM am_roles WHERE id = ?")
+    .bind(roleId)
+    .first();
+  if (!role) {
+    return c.json({ error: "Role not found" }, 404);
+  }
+  const access = await db
+    .prepare(`
+      SELECT 1 
+      FROM team_assignments 
+      WHERE user_id = ? AND (
+        team_id = ? OR team_id IN (SELECT team_id FROM am_role_teams WHERE role_id = ?)
+      )
+      LIMIT 1
+    `)
+    .bind((rmUser as any).id, (role as any).team_id, roleId)
+    .first();
+  if (!access) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+  await db
+    .prepare("UPDATE am_roles SET status = ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(status, roleId)
+    .run();
+  return c.json({ success: true });
+});
+
 // Get roles for RM (view only)
 app.get("/api/rm/roles", rmOnly, async (c) => {
   const db = c.env.DB;

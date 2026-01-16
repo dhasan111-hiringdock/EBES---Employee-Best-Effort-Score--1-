@@ -150,47 +150,44 @@ export default function RMSubmissions() {
           No pending submissions.
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Candidate</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Validation</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Payment</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Location</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Contract Type</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Score (0–5)</th>
-                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Notes</th>
-                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-700">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((i) => {
-                const k = keyOf(i);
-                const f = forms[k] || {};
-                return (
-                  <tr key={k} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="py-2 px-3">
-                      <div className="font-medium text-slate-900">{i.candidate_name}</div>
-                      <div className="text-xs text-slate-500">
-                        {i.role_code} · {i.client_name}
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">
-                        Submitted {new Date(i.submission_date).toLocaleDateString()}
-                      </div>
-                    </td>
-                    <td className="py-2 px-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {items.map((i) => {
+            const k = keyOf(i);
+            const f = forms[k] || {};
+            return (
+              <div key={k} className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <div className="font-semibold text-slate-900">{i.candidate_name}</div>
+                  <div className="text-xs text-slate-500">{i.role_code} · {i.client_name}</div>
+                  <div className="text-[10px] text-slate-400 mt-1">Submitted {new Date(i.submission_date).toLocaleDateString()}</div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Validation</label>
                       <select
                         value={f.rm_validation_status ?? "valid"}
                         onChange={(e) => setForms((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), rm_validation_status: e.target.value } }))}
-                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                        className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full bg-white"
                       >
                         <option value="valid">Valid</option>
                         <option value="invalid">Invalid</option>
                       </select>
-                    </td>
-                    <td className="py-2 px-3">
-                      <div className="relative">
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Contract Type</label>
+                      <select
+                        value={f.rm_work_type ?? "Payroll"}
+                        onChange={(e) => setForms((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), rm_work_type: e.target.value } }))}
+                        className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full bg-white"
+                      >
+                        <option value="SOW">SOW</option>
+                        <option value="Payroll">Payroll</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Payment</label>
+                      <div className="relative mt-1">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
                         <input
                           type="number"
@@ -205,77 +202,70 @@ export default function RMSubmissions() {
                           return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
                         })()}
                       </div>
-                    </td>
-                    <td className="py-2 px-3">
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Location</label>
                       <input
                         type="text"
                         placeholder="Location"
                         value={f.rm_location ?? ""}
                         onChange={(e) => setForms((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), rm_location: e.target.value } }))}
-                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                        className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
                       />
-                    </td>
-                    <td className="py-2 px-3">
-                      <select
-                        value={f.rm_work_type ?? "Payroll"}
-                        onChange={(e) => setForms((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), rm_work_type: e.target.value } }))}
-                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
-                      >
-                        <option value="SOW">SOW</option>
-                        <option value="Payroll">Payroll</option>
-                      </select>
-                    </td>
-                    <td className="py-2 px-3">
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Score (0–5)</label>
                       <input
                         type="number"
                         step="0.01"
                         min={0}
                         max={5}
-                        placeholder="Score (0–5)"
+                        placeholder="Score"
                         value={f.rm_score_0_5 ?? ""}
                         onChange={(e) => setForms((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), rm_score_0_5: e.target.value } }))}
-                        className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                        className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
                       />
-                    </td>
-                    <td className="py-2 px-3">
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">Notes</label>
                       <textarea
                         placeholder="Notes"
                         value={f.rm_notes ?? ""}
                         onChange={(e) => setForms((prev) => ({ ...prev, [k]: { ...(prev[k] || {}), rm_notes: e.target.value } }))}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                        className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
                         rows={2}
                       />
-                    </td>
-                    <td className="py-2 px-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          disabled={submitting}
-                          onClick={() => accept(i)}
-                          className="px-3 py-2 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                        >
-                          Send to AM
-                        </button>
-                        <input
-                          className="px-3 py-2 text-xs border border-red-200 rounded-lg"
-                          type="text"
-                          placeholder="Discard reason"
-                          value={reasons[k] ?? ""}
-                          onChange={(e) => setReasons((prev) => ({ ...prev, [k]: e.target.value }))}
-                        />
-                        <button
-                          disabled={submitting}
-                          onClick={() => discard(i)}
-                          className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                        >
-                          Discard
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    </div>
+                  </div>
+                </div>
+                <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <input
+                    className="flex-1 px-3 py-2 text-xs border border-red-200 rounded-lg"
+                    type="text"
+                    placeholder="Discard reason"
+                    value={reasons[k] ?? ""}
+                    onChange={(e) => setReasons((prev) => ({ ...prev, [k]: e.target.value }))}
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={submitting}
+                      onClick={() => accept(i)}
+                      className="px-3 py-2 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                    >
+                      Send to AM
+                    </button>
+                    <button
+                      disabled={submitting}
+                      onClick={() => discard(i)}
+                      className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

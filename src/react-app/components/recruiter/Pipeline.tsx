@@ -45,6 +45,7 @@ interface RoleSubmission {
   rm_location?: string;
   rm_work_type?: string;
   association_status?: string;
+  has_interview?: number;
 }
 
 interface PipelineData {
@@ -730,15 +731,17 @@ export default function RecruiterPipeline() {
                                 </button>
                                 {openMenuFor === `${pipeModal.roleId}:${row.candidate_id}` && (
                                   <div className="absolute z-10 mt-2 bg-white border border-gray-200 rounded shadow-lg p-2 w-48">
-                                    <button
-                                      className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                      onClick={() => {
-                                        setOpenMenuFor(null);
-                                        markDeal(pipeModal.roleId, row.candidate_id!);
-                                      }}
-                                    >
-                                      Deal
-                                    </button>
+                                    {row.has_interview === 1 && (
+                                      <button
+                                        className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
+                                        onClick={() => {
+                                          setOpenMenuFor(null);
+                                          markDeal(pipeModal.roleId, row.candidate_id!);
+                                        }}
+                                      >
+                                        Deal
+                                      </button>
+                                    )}
                                     <button
                                       className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded text-red-600"
                                       onClick={() => {
@@ -754,7 +757,7 @@ export default function RecruiterPipeline() {
                               <td className="py-2 px-3 text-right">
                                 {row.is_discarded !== 1 ? (
                                   <div className="flex items-center justify-end gap-2">
-                                    {row.association_status === 'client_submitted' && (
+                                    {row.association_status === 'client_submitted' && row.has_interview === 1 && (
                                       <button
                                         onClick={() => markDeal(pipeModal.roleId, row.candidate_id!)}
                                         className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"

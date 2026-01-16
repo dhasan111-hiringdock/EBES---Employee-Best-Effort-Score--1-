@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { X, Briefcase, Building2, Users, User } from 'lucide-react';
-import { fetchWithAuth } from '@/react-app/utils/api';
+import { fetchWithAuth, rmUpdateRoleStatus } from '@/react-app/utils/api';
 
 interface Client {
   id: number;
@@ -33,6 +33,7 @@ interface Role {
   role_code: string;
   title: string;
   description: string;
+  status: string;
   client_id: number;
   team_id: number;
   account_manager_id: number;
@@ -59,6 +60,7 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
     team_ids: [] as number[],
     title: '',
     description: '',
+    status: '',
     account_manager_id: '',
     recruiter_ids: [] as number[]
   });
@@ -99,6 +101,7 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
         team_ids: [],
         title: role.title,
         description: role.description || '',
+        status: role.status,
         account_manager_id: String(role.account_manager_id),
         recruiter_ids: []
       });
@@ -146,7 +149,7 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.client_id || formData.team_ids.length === 0 || !formData.title || !formData.account_manager_id || !role) {
+    if (!formData.client_id || formData.team_ids.length === 0 || !formData.title || !formData.account_manager_id || !formData.status || !role) {
       alert('Please fill in all required fields and select at least one team');
       return;
     }
@@ -167,7 +170,6 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
       });
 
       if (response.ok) {
-        // Update recruiter assignments
         await fetchWithAuth(`/api/rm/roles/${role.id}/recruiters`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -175,6 +177,10 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
             recruiter_ids: formData.recruiter_ids
           })
         });
+
+        if (formData.status !== role.status) {
+          await rmUpdateRoleStatus(role.id, formData.status);
+        }
 
         onSuccess();
         handleClose();
@@ -196,6 +202,7 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
       team_ids: [],
       title: '',
       description: '',
+      status: '',
       account_manager_id: '',
       recruiter_ids: []
     });
@@ -278,6 +285,26 @@ export default function EditRoleModal({ isOpen, role, onClose, onSuccess }: Edit
                     {client.name} ({client.client_code})
                   </option>
                 ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Status <span className="text-red-500">*</span>
+              </label>
+              <select
+                required
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all appearance-none bg-white"
+              >
+                <option value="">Select status</option>
+                <option value="active">Active</option>
+                <option value="deal">Deal</option>
+                <option value="lost">Lost</option>
+                <option value="on_hold">On Hold</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="no_answer">No Answer</option>
               </select>
             </div>
 

@@ -21,7 +21,7 @@ import {
   UserPlus,
   Send
 } from 'lucide-react';
-import { fetchWithAuth, rmDiscardCandidate, rmSendCandidateToAM, rmReviewSubmission, rmReviewByRoleCandidate } from '@/react-app/utils/api';
+import { fetchWithAuth, rmDiscardCandidate, rmSendCandidateToAM, rmReviewSubmission, rmReviewByRoleCandidate, rmUpdateRoleStatus } from '@/react-app/utils/api';
 import CreateRoleModal from './CreateRoleModal';
 import EditRoleModal from './EditRoleModal';
 import AssignRecruiterModal from './AssignRecruiterModal';
@@ -178,6 +178,8 @@ export default function RMRoles() {
   const [exportFields, setExportFields] = useState<string[]>(allExportFields);
   const [exportPresets, setExportPresets] = useState<Array<{ name: string; fields: string[] }>>([]);
   const [presetName, setPresetName] = useState('');
+  const [statusDialog, setStatusDialog] = useState<{ roleId: number; current: string } | null>(null);
+  const [statusValue, setStatusValue] = useState<string>('');
   
   const pendingEvalCount = submissions.pending_evaluation?.length || 0;
 
@@ -1184,6 +1186,17 @@ export default function RMRoles() {
                           >
                             <Edit className="w-4 h-4" />
                           </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setStatusDialog({ roleId: role.id, current: role.status });
+                              setStatusValue(role.status);
+                            }}
+                            className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            title="Change Status"
+                          >
+                            <Briefcase className="w-4 h-4" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1204,7 +1217,7 @@ export default function RMRoles() {
 
       {isExportOpen && (
         <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
-          <div className="bg-white w-full max-w-3xl rounded-xl shadow-lg border border-slate-200 p-6">
+          <div className="bg-white w_full max-w-3xl rounded-xl shadow-lg border border-slate-200 p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-slate-800">Export Roles</h3>
               <button
@@ -1297,6 +1310,64 @@ export default function RMRoles() {
               >
                 <Download className="w-4 h-4" />
                 Export Selected
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {statusDialog && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-lg border border-slate-200 p-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-3">Change Role Status</h3>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+            <select
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              value={statusValue}
+              onChange={(e) => setStatusValue(e.target.value)}
+            >
+              <option value="active">Active</option>
+              <option value="on_hold">On Hold</option>
+              <option value="lost">Lost</option>
+              <option value="no_answer">No Answer</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="deal">Deal</option>
+            </select>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setStatusDialog(null); setStatusValue(''); }}
+                className="px-3 py-2 text-sm border border-slate-200 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const dlg = statusDialog;
+                  if (!dlg) return;
+                  try {
+                    const res = await rmUpdateRoleStatus(dlg.roleId, statusValue || dlg.current);
+                    if (res.ok) {
+                      await fetchRoles();
+                      if (selectedRole && selectedRole.id === dlg.roleId) {
+                        const updated = roles.find(r => r.id === dlg.roleId);
+                        if (updated) setSelectedRole(updated);
+                      }
+                    } else {
+                      try {
+                        const j = await res.json();
+                        alert(j?.error || 'Failed to update status');
+                      } catch {
+                        alert('Failed to update status');
+                      }
+                    }
+                  } finally {
+                    setStatusDialog(null);
+                    setStatusValue('');
+                  }
+                }}
+                className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg"
+              >
+                Save
               </button>
             </div>
           </div>
@@ -1573,38 +1644,40 @@ export default function RMRoles() {
                               <Clock className="w-4 h-4 text-indigo-600" />
                               <span className="text-sm font-semibold text-slate-700">Pending Evaluation</span>
                             </div>
-                            <div className="overflow-x-auto">
-                              <table className="w-full">
-                                <thead>
-                                  <tr className="border-b border-slate-200 bg-slate-50">
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Candidate</th>
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Validation</th>
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Payment</th>
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Location</th>
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Contract Type</th>
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Score (0–5)</th>
-                                    <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Notes</th>
-                                    <th className="text-right py-2 px-3 text-xs font-semibold text-slate-700">Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {submissions.pending_evaluation.map((item) => (
-                                    <tr key={item.association_id} className="border-b border-slate-100 hover:bg-slate-50">
-                                      <td className="py-2 px-3">
-                                        <div className="font-medium text-slate-900">{item.candidate_name}</div>
-                                        <div className="text-xs text-slate-500">{item.recruiter_name} · {item.recruiter_code}</div>
-                                      </td>
-                                      <td className="py-2 px-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {submissions.pending_evaluation.map((item) => (
+                                <div key={item.association_id} className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                                  <div className="px-4 py-3 border-b border-slate-100">
+                                    <div className="font-semibold text-slate-900">{item.candidate_name}</div>
+                                    <div className="text-xs text-slate-500">{item.recruiter_name} · {item.recruiter_code}</div>
+                                  </div>
+                                  <div className="p-4 space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                      <div>
+                                        <label className="text-xs font-medium text-slate-600">Validation</label>
                                         <input
                                           type="text"
                                           placeholder="Validation status"
                                           defaultValue={item.rm_validation_status || ''}
                                           onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_validation_status', e.target.value)}
-                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                          className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
                                         />
-                                      </td>
-                                      <td className="py-2 px-3">
-                                        <div className="relative">
+                                      </div>
+                                      <div>
+                                        <label className="text-xs font-medium text-slate-600">Contract Type</label>
+                                        <select
+                                          defaultValue={item.rm_work_type || ''}
+                                          onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_work_type', e.target.value)}
+                                          className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full bg-white"
+                                        >
+                                          <option value="">Select contract type</option>
+                                          <option value="SOW">SOW</option>
+                                          <option value="Payroll">Payroll</option>
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label className="text-xs font-medium text-slate-600">Payment</label>
+                                        <div className="relative mt-1">
                                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
                                           <input
                                             type="number"
@@ -1619,74 +1692,64 @@ export default function RMRoles() {
                                             return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs">{unit}</span> : null;
                                           })()}
                                         </div>
-                                      </td>
-                                      <td className="py-2 px-3">
+                                      </div>
+                                      <div>
+                                        <label className="text-xs font-medium text-slate-600">Location</label>
                                         <input
                                           type="text"
                                           placeholder="Location"
                                           defaultValue={item.rm_location || ''}
                                           onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_location', e.target.value)}
-                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                          className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
                                         />
-                                      </td>
-                                      <td className="py-2 px-3">
-                                        <select
-                                          defaultValue={item.rm_work_type || ''}
-                                          onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_work_type', e.target.value)}
-                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
-                                        >
-                                          <option value="">Select contract type</option>
-                                          <option value="SOW">SOW</option>
-                                          <option value="Payroll">Payroll</option>
-                                        </select>
-                                      </td>
-                                      <td className="py-2 px-3">
+                                      </div>
+                                      <div>
+                                        <label className="text-xs font-medium text-slate-600">Score (0–5)</label>
                                         <input
                                           type="number"
                                           step="0.01"
                                           min={0}
                                           max={5}
-                                          placeholder="Validation score (0–5)"
+                                          placeholder="Validation score"
                                           defaultValue={(item as any).score != null ? String((item as any).score) : ''}
                                           onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_score_0_5', e.target.value)}
-                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                          className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
                                         />
-                                      </td>
-                                      <td className="py-2 px-3">
+                                      </div>
+                                      <div>
+                                        <label className="text-xs font-medium text-slate-600">Notes</label>
                                         <input
                                           type="text"
                                           placeholder="Notes"
                                           defaultValue={item.rm_notes || ''}
                                           onChange={(e) => updateReviewEdit((item.submission_id || item.association_id)!, 'rm_notes', e.target.value)}
-                                          className="px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
+                                          className="mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm w-full"
                                         />
-                                      </td>
-                                      <td className="py-2 px-3 text-right">
-                                        <div className="flex items-center justify-end gap-2">
-                                          <button
-                                            onClick={() => saveReview(item.submission_id, selectedRole!.id, item.candidate_id, item.association_id)}
-                                            className="px-3 py-2 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                                          >
-                                            Save
-                                          </button>
-                                          <button
-                                            onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
-                                            className="px-3 py-2 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                          >
-                                            Send to AM
-                                          </button>
-                                          <button
-                                            onClick={() => setNoteDialog({ roleId: selectedRole!.id, candidateId: item.candidate_id, submissionId: item.submission_id })}
-                                            className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                                          >
-                                            Reject
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => saveReview(item.submission_id, selectedRole!.id, item.candidate_id, item.association_id)}
+                                      className="px-3 py-2 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      onClick={() => sendToAM(selectedRole!.id, item.candidate_id, item.submission_id, item.association_id)}
+                                      className="px-3 py-2 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                                    >
+                                      Send to AM
+                                    </button>
+                                    <button
+                                      onClick={() => setNoteDialog({ roleId: selectedRole!.id, candidateId: item.candidate_id, submissionId: item.submission_id })}
+                                      className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+                                    >
+                                      Reject
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         )}
@@ -1696,9 +1759,9 @@ export default function RMRoles() {
                               <tr className="border-b border-slate-200 bg-slate-50">
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Candidate</th>
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Location</th>
+                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Contract Type</th>
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Payment</th>
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Score (0–5)</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Contract Type</th>
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Submitted</th>
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">RM Validation</th>
                                 <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Status</th>
@@ -1715,11 +1778,11 @@ export default function RMRoles() {
                                     </div>
                                   </td>
                                   <td className="py-2 px-3 text-sm text-slate-700">{row.rm_location || "-"}</td>
+                                  <td className="py-2 px-3 text-sm text-slate-700">{row.rm_work_type || "-"}</td>
                                   <td className="py-2 px-3 text-sm text-slate-700" title={`Contract: ${row.rm_work_type || "-"} • Unit: ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || '-'}`}>
                                     {row.rm_rate_bill != null ? `€${Number(row.rm_rate_bill)} ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || ''}` : "-"}
                                   </td>
                                   <td className="py-2 px-3 text-sm text-slate-700">{(row as any).score != null ? Number((row as any).score).toFixed(2) : "-"}</td>
-                                  <td className="py-2 px-3 text-sm text-slate-700">{row.rm_work_type || "-"}</td>
                                   <td className="py-2 px-3 text-sm text-slate-700">{row.submission_date?.slice(0, 10) || "-"}</td>
                                   <td className="py-2 px-3 text-sm text-slate-700">{row.rm_validation_status || "-"}</td>
                                   <td className="py-2 px-3 text-sm">

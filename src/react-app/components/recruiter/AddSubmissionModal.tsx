@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, Briefcase, Calendar, FileText, CheckCircle, Users, ArrowRight, Check, Plus, Send } from "lucide-react";
-import { fetchWithAuth } from "@/react-app/utils/api";
+import { fetchWithAuth, getRecruiterRoleSubmissions } from "@/react-app/utils/api";
 
 interface Role {
   id: number;
@@ -63,6 +63,14 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
   
   // Interview-specific fields
   const [interviewLevel, setInterviewLevel] = useState<1 | 2 | 3>(1);
+  const [roleCandidates, setRoleCandidates] = useState<Array<{
+    candidate_id: number;
+    candidate_name: string;
+    candidate_email?: string;
+    candidate_phone?: string;
+    association_status?: string;
+  }>>([]);
+  const [loadingRoleCandidates, setLoadingRoleCandidates] = useState(false);
 
   // Update submission date when selectedDate prop changes
   useEffect(() => {
@@ -193,6 +201,10 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
           return false;
         }
       } else if (entryType === "interview") {
+        if (!selectedCandidateId) {
+          setSubmissionError('Please select a candidate submitted to this role');
+          return false;
+        }
         const resp = await fetchWithAuth("/api/recruiter/submissions", {
           method: "POST",
           body: JSON.stringify({
@@ -220,6 +232,36 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
       return false;
     }
   };
+
+  useEffect(() => {
+    const fetchRoleCandidates = async () => {
+      if (!selectedRole || entryType !== "interview") {
+        setRoleCandidates([]);
+        return;
+      }
+      setLoadingRoleCandidates(true);
+      try {
+        const resp = await getRecruiterRoleSubmissions(selectedRole.id);
+        if (resp.ok) {
+          const data = await resp.json();
+          const list = (data?.under_consideration || []) as Array<any>;
+          const eligible = list.filter((r) => r.is_discarded !== 1 && (r.association_status === "submitted" || r.association_status === "client_submitted"));
+          setRoleCandidates(
+            eligible.map((r) => ({
+              candidate_id: r.candidate_id,
+              candidate_name: r.candidate_name,
+              candidate_email: r.candidate_email,
+              candidate_phone: r.candidate_phone,
+              association_status: r.association_status,
+            }))
+          );
+        }
+      } finally {
+        setLoadingRoleCandidates(false);
+      }
+    };
+    fetchRoleCandidates();
+  }, [selectedRole, entryType]);
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -607,11 +649,77 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                         </button>
                       ))}
                     </div>
+                    <div className="mt-6">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Select Candidate (submitted to this role)
+                      </label>
+                      {loadingRoleCandidates ? (
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-indigo-200 border-t-indigo-600"></div>
+                          Loading candidates...
+                        </div>
+                      ) : roleCandidates.length > 0 ? (
+                        <div className="space-y-2">
+                          {roleCandidates.map((c) => (
+                            <button
+                              key={c.candidate_id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedCandidateId(c.candidate_id);
+                                setCandidateName(c.candidate_name || "");
+                                setCandidateEmail(c.candidate_email || "");
+                                setCandidatePhone(c.candidate_phone || "");
+                                setShowSimilarCandidates(false);
+                              }}
+                              className={`w-full p-3 rounded-lg text-left transition-all ${
+                                selectedCandidateId === c.candidate_id
+                                  ? "bg-purple-100 border-2 border-purple-400"
+                                  : "bg-white border border-slate-200 hover:border-slate-300"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-slate-900">{c.candidate_name}</span>
+                                  {selectedCandidateId === c.candidate_id && (
+                                    <CheckCircle className="w-4 h-4 text-purple-600" />
+                                  )}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  {c.association_status}
+                                </div>
+                              </div>
+                              {c.candidate_email && (
+                                <p className="text-xs text-slate-600 mt-1">{c.candidate_email}</p>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded text-amber-700 text-sm">
+                          No submitted candidates found for this role.
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-6">
+                      <label className="block text-sm font-medium text-slate-700 mb-2">
+                        Notes (Optional)
+                      </label>
+                      <div className="relative">
+                        <FileText className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
+                        <textarea
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          rows={3}
+                          className="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                          placeholder="Add any additional details..."
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {/* Common fields - only show if entry type is selected */}
-                {entryType && (
+                {/* Submission-specific candidate and contact fields */}
+                {entryType === "submission" && (
                   <>
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -632,7 +740,6 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                         For role: <span className="font-semibold">{selectedRole.title}</span>
                       </p>
                       
-                      {/* Similar Candidates Alert */}
                       {showSimilarCandidates && similarCandidates.length > 0 && (
                         <div className="mt-3 p-4 bg-yellow-50 border-2 border-yellow-300 rounded-lg">
                           <div className="flex items-start gap-3 mb-3">
@@ -726,7 +833,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                         </div>
                       )}
                     </div>
-
+ 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -753,7 +860,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                         />
                       </div>
                     </div>
-
+ 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
                         Notes (Optional)
@@ -792,7 +899,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                   <button
                     type="button"
                     onClick={handleSubmitAndAddAnother}
-                    disabled={submitting || !entryType || !candidateName.trim()}
+                    disabled={submitting || !entryType || (entryType === "interview" ? !selectedCandidateId : !candidateName.trim())}
                     className="flex-1 px-6 py-3 border-2 border-indigo-600 text-indigo-600 rounded-lg font-medium hover:bg-indigo-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
                     <Plus className="w-5 h-5" />
@@ -801,7 +908,7 @@ export default function AddSubmissionModal({ client, selectedDate, onClose, onSu
                   <button
                     type="button"
                     onClick={handleSubmit}
-                    disabled={submitting || !entryType || !candidateName.trim()}
+                    disabled={submitting || !entryType || (entryType === "interview" ? !selectedCandidateId : !candidateName.trim())}
                     className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                   >
                     {submitting ? "Submitting..." : "Submit & Close"}
