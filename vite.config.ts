@@ -16,15 +16,6 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 5000,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('node_modules/react')) return 'react-vendor';
-          if (id.includes('node_modules/recharts')) return 'charts-vendor';
-          return undefined;
-        },
-      },
-    },
   },
   resolve: {
     alias: [
