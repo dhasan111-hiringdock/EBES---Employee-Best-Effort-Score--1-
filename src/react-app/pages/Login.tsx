@@ -41,11 +41,13 @@ export default function Login() {
       let devHealthy = false;
       try {
         if (DEV_BASE) {
-          const controller = new AbortController();
-          const t = setTimeout(() => controller.abort(), 1200);
-          const res = await fetch(`${DEV_BASE}/api/health`, { signal: controller.signal });
-          clearTimeout(t);
-          devHealthy = res.ok;
+          const res = await Promise.race([
+            fetch(`${DEV_BASE}/api/health`),
+            new Promise<Response>((resolve) =>
+              setTimeout(() => resolve(new Response(null, { status: 408 })), 1200)
+            ),
+          ]);
+          devHealthy = (res as Response).ok;
         }
       } catch {}
       const bases: string[] = (devHealthy

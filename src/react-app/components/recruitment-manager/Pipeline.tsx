@@ -37,6 +37,12 @@ export default function Pipeline() {
   const [roles, setRoles] = useState<Role[]>([]);
   const [dataByRole, setDataByRole] = useState<Record<number, { pending_evaluation: RoleSubmission[]; under_consideration: RoleSubmission[]; rejected: RoleSubmission[] }>>({});
   const [selectedStatus, setSelectedStatus] = useState<string>("active");
+  interface Client { id: number; name: string; client_code: string; }
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+  interface Team { id: number; name: string; team_code: string; }
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
   const [rmEdits, setRmEdits] = useState<Record<number, Partial<RoleSubmission & { rm_notes?: string; rm_validation_status?: string; rm_rate_bill?: number; rm_rate_pay?: number; rm_location?: string; rm_work_type?: string; rm_score_0_5?: number }>>>({});
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -74,7 +80,11 @@ export default function Pipeline() {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await fetchWithAuth(`/api/rm/roles?status=${selectedStatus}`);
+        const params = new URLSearchParams();
+        params.set("status", selectedStatus);
+        if (selectedClientId) params.set("client_id", String(selectedClientId));
+        if (selectedTeamId) params.set("team_id", String(selectedTeamId));
+        const res = await fetchWithAuth(`/api/rm/roles?${params.toString()}`);
         if (!res.ok) return;
         const rolesData: Role[] = await res.json();
         setRoles(rolesData);
@@ -98,7 +108,28 @@ export default function Pipeline() {
       }
     };
     load();
-  }, [selectedStatus]);
+  }, [selectedClientId, selectedTeamId, selectedStatus]);
+  useEffect(() => {
+    const loadAssignments = async () => {
+      try {
+        const [clientsRes, teamsRes] = await Promise.all([
+          fetchWithAuth("/api/rm/clients"),
+          fetchWithAuth("/api/rm/teams"),
+        ]);
+        if (clientsRes.ok) {
+          const cdata = await clientsRes.json();
+          setClients(cdata || []);
+          if (!selectedClientId && (cdata || []).length > 0) setSelectedClientId((cdata[0] as any)?.id ?? null);
+        }
+        if (teamsRes.ok) {
+          const tdata = await teamsRes.json();
+          setTeams(tdata || []);
+          if (!selectedTeamId && (tdata || []).length > 0) setSelectedTeamId((tdata[0] as any)?.id ?? null);
+        }
+      } catch {}
+    };
+    loadAssignments();
+  }, []);
 
   const totals = useMemo(() => {
     let submittedToClient = 0;
@@ -301,6 +332,32 @@ export default function Pipeline() {
           </div>
         </div>
         <div className="w-full md:w-64">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Client</label>
+          <select
+            value={selectedClientId != null ? String(selectedClientId) : ""}
+            onChange={(e) => setSelectedClientId(e.target.value ? Number(e.target.value) : null)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3"
+          >
+            <option value="">All Clients</option>
+            {clients.map((c) => (
+              <option key={c.id} value={String(c.id)}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Team</label>
+          <select
+            value={selectedTeamId != null ? String(selectedTeamId) : ""}
+            onChange={(e) => setSelectedTeamId(e.target.value ? Number(e.target.value) : null)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm mb-3"
+          >
+            <option value="">All Teams</option>
+            {teams.map((t) => (
+              <option key={t.id} value={String(t.id)}>
+                {t.name}
+              </option>
+            ))}
+          </select>
           <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Role Status</label>
           <select
             value={selectedStatus}

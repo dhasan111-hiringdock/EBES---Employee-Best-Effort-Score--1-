@@ -404,6 +404,7 @@ app.put("/api/rm/roles/:id/status", rmOnly, async (c) => {
   const roleId = c.req.param("id");
   const body = await c.req.json();
   const status = (body?.status || "").toString();
+  const closingReason: string | null = body?.closing_reason ?? null;
   const allowed = ["active", "lost", "cancelled", "on_hold", "no_answer", "deal"];
   if (!allowed.includes(status)) {
     return c.json({ error: "Invalid status" }, 400);
@@ -429,9 +430,16 @@ app.put("/api/rm/roles/:id/status", rmOnly, async (c) => {
   if (!access) {
     return c.json({ error: "Forbidden" }, 403);
   }
+  const tableInfo = await db.prepare("PRAGMA table_info(am_roles)").all();
+  const hasClosingReason = (tableInfo.results || []).some((r: any) => (r as any).name === "closing_reason");
+  if (!hasClosingReason) {
+    try {
+      await db.prepare("ALTER TABLE am_roles ADD COLUMN closing_reason TEXT").run();
+    } catch {}
+  }
   await db
-    .prepare("UPDATE am_roles SET status = ?, updated_at = datetime('now') WHERE id = ?")
-    .bind(status, roleId)
+    .prepare("UPDATE am_roles SET status = ?, closing_reason = ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(status, status === 'active' ? null : closingReason, roleId)
     .run();
   return c.json({ success: true });
 });
@@ -520,6 +528,27 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
         (SELECT COUNT(*) 
          FROM recruiter_submissions rs 
          WHERE rs.role_id = r.id AND rs.entry_type = 'interview') as total_interviews,
+        COALESCE(r.closing_reason,
+        CASE 
+          WHEN r.status = 'lost' THEN (
+            SELECT dr.dropout_reason 
+            FROM dropout_requests dr 
+            WHERE dr.role_id = r.id AND dr.final_status = 'completed' 
+            ORDER BY dr.am_decided_at DESC 
+            LIMIT 1
+          )
+          WHEN r.status = 'deal' THEN (
+            SELECT 'Deal closed with ' || COALESCE(rs2.candidate_name, '') 
+            FROM recruiter_submissions rs2 
+            WHERE rs2.role_id = r.id AND rs2.entry_type = 'deal' 
+            ORDER BY rs2.submission_date DESC, rs2.created_at DESC 
+            LIMIT 1
+          )
+          WHEN r.status = 'on_hold' THEN 'Role on hold'
+          WHEN r.status = 'cancelled' THEN 'Role cancelled'
+          WHEN r.status = 'no_answer' THEN 'Client not responding'
+          ELSE NULL
+        END) as closing_reason,
         CAST(julianday('now') - julianday(r.created_at) AS INTEGER) as days_open,
         (SELECT CAST(julianday(MIN(rs2.submission_date)) - julianday(r.created_at) AS INTEGER)
          FROM recruiter_submissions rs2

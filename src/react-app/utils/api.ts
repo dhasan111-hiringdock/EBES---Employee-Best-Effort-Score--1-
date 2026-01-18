@@ -2,10 +2,26 @@ const DEFAULT_API_BASE = 'https://ebes-app.dhasan111.workers.dev';
 const DEV_BASE = typeof window !== 'undefined' && window.location && (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1'))
   ? 'http://127.0.0.1:8787'
   : undefined;
-const LS_BASE = typeof window !== 'undefined' ? (localStorage.getItem('api_base') || undefined) : undefined;
-const API_BASE: string = (import.meta as any)?.env?.VITE_API_BASE_URL ?? LS_BASE ?? DEV_BASE ?? DEFAULT_API_BASE;
+function resolveApiBase(): string {
+  const envBase = (import.meta as any)?.env?.VITE_API_BASE_URL;
+  const lsBase = typeof window !== 'undefined' ? (localStorage.getItem('api_base') || undefined) : undefined;
+  let base = envBase ?? lsBase ?? DEV_BASE ?? DEFAULT_API_BASE;
+  if (
+    typeof window !== 'undefined' &&
+    window.location &&
+    (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1'))
+  ) {
+    if (base && base.includes('localhost:5173')) {
+      base = DEV_BASE ?? DEFAULT_API_BASE;
+      try {
+        localStorage.setItem('api_base', base);
+      } catch {}
+    }
+  }
+  return base;
+}
 export function getApiBase(): string {
-  return API_BASE;
+  return resolveApiBase();
 }
 const requestCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 5000; // 5 seconds cache for GET requests
@@ -43,7 +59,7 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
   // Implement request deduplication for GET requests
   const method = options?.method?.toUpperCase() || 'GET';
   const isAbsolute = url.startsWith('http://') || url.startsWith('https://');
-  const fullUrl = isAbsolute ? url : (API_BASE ? `${API_BASE}${url}` : url);
+  const fullUrl = isAbsolute ? url : (resolveApiBase() ? `${resolveApiBase()}${url}` : url);
   
   // Clear entire cache on any mutation to ensure fresh data
   if (method !== 'GET') {
@@ -63,8 +79,20 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
       });
     }
 
-    // Make the actual fetch request
-    const response = await fetch(fullUrl, fetchOptions);
+    let response: Response;
+    try {
+      response = await fetch(fullUrl, fetchOptions);
+    } catch {
+      if (!isAbsolute && resolveApiBase() === DEV_BASE) {
+        const fallbackUrl = `${DEFAULT_API_BASE}${url}`;
+        try {
+          localStorage.setItem('api_base', DEFAULT_API_BASE);
+        } catch {}
+        response = await fetch(fallbackUrl, fetchOptions);
+      } else {
+        throw new Error('Network error');
+      }
+    }
     
     // Only cache successful responses
     if (response.ok) {
@@ -91,12 +119,23 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
     return response;
   }
 
-  return fetch(fullUrl, fetchOptions);
+  try {
+    return await fetch(fullUrl, fetchOptions);
+  } catch {
+    if (!isAbsolute && resolveApiBase() === DEV_BASE) {
+      const fallbackUrl = `${DEFAULT_API_BASE}${url}`;
+      try {
+        localStorage.setItem('api_base', DEFAULT_API_BASE);
+      } catch {}
+      return await fetch(fallbackUrl, fetchOptions);
+    }
+    throw new Error('Network error');
+  }
 }
 
 export async function fetchPublic(url: string, options?: RequestInit): Promise<Response> {
   const isAbsolute = url.startsWith('http://') || url.startsWith('https://');
-  const fullUrl = isAbsolute ? url : (API_BASE ? `${API_BASE}${url}` : url);
+  const fullUrl = isAbsolute ? url : (resolveApiBase() ? `${resolveApiBase()}${url}` : url);
   return fetch(fullUrl, options ?? {});
 }
 
@@ -234,10 +273,10 @@ export async function recruiterSeedSampleData(perRole?: number, clientId?: numbe
   });
 }
 
-export async function rmUpdateRoleStatus(roleId: number, status: string): Promise<Response> {
+export async function rmUpdateRoleStatus(roleId: number, status: string, closing_reason?: string | null): Promise<Response> {
   return fetchWithAuth(`/api/rm/roles/${roleId}/status`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, closing_reason: closing_reason ?? null }),
   });
 }

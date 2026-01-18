@@ -57,6 +57,7 @@ interface Role {
   days_open?: number;
   first_submission_days?: number | null;
   first_interview_days?: number | null;
+  closing_reason?: string | null;
 }
 
 interface Client {
@@ -129,6 +130,7 @@ export default function RMRoles() {
   });
   const [reviewEdits, setReviewEdits] = useState<Record<number, { rm_validation_status?: string; rm_payment?: string; rm_location?: string; rm_work_type?: string; rm_notes?: string; rm_score_0_5?: string }>>({});
   const [, setAcceptOpen] = useState<Record<number, boolean>>({});
+  const [statusReason, setStatusReason] = useState<string>('');
   const submissionsRef = useRef<HTMLDivElement | null>(null);
   const [detailsTab, setDetailsTab] = useState<'role' | 'submissions'>('submissions');
   const [sortKey, setSortKey] = useState<'recent' | 'title' | 'client' | 'team' | 'status'>('recent');
@@ -1072,6 +1074,9 @@ export default function RMRoles() {
                     Status
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    Reason
+                  </th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
                     Submissions
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
@@ -1130,6 +1135,9 @@ export default function RMRoles() {
                           <StatusIcon className="w-3.5 h-3.5" />
                           {statusConfig.label}
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-slate-700">{role.closing_reason || "-"}</p>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <p className="text-sm font-semibold text-slate-800">{role.total_submissions ?? 0}</p>
@@ -1333,6 +1341,24 @@ export default function RMRoles() {
               <option value="cancelled">Cancelled</option>
               <option value="deal">Deal</option>
             </select>
+            {statusDialog && ['lost','on_hold','cancelled','no_answer'].includes(statusValue || statusDialog.current) && (
+              <div className="mt-4">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Reason</label>
+                <textarea
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  rows={3}
+                  value={statusReason}
+                  onChange={(e) => setStatusReason(e.target.value)}
+                  placeholder={
+                    (statusValue || statusDialog.current) === 'on_hold' ? 'e.g., Awaiting budget approval, client paused hiring' :
+                    (statusValue || statusDialog.current) === 'cancelled' ? 'e.g., Client cancelled project, position eliminated' :
+                    (statusValue || statusDialog.current) === 'no_answer' ? 'e.g., Multiple follow-ups with no response' :
+                    'e.g., Requirements changed, not proceeding'
+                  }
+                />
+                <p className="text-[11px] text-slate-500 mt-1">Optional; helps explain the closing status.</p>
+              </div>
+            )}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => { setStatusDialog(null); setStatusValue(''); }}
@@ -1345,7 +1371,7 @@ export default function RMRoles() {
                   const dlg = statusDialog;
                   if (!dlg) return;
                   try {
-                    const res = await rmUpdateRoleStatus(dlg.roleId, statusValue || dlg.current);
+                    const res = await rmUpdateRoleStatus(dlg.roleId, statusValue || dlg.current, ['lost','on_hold','cancelled','no_answer'].includes(statusValue || dlg.current) ? (statusReason || null) : null);
                     if (res.ok) {
                       await fetchRoles();
                       if (selectedRole && selectedRole.id === dlg.roleId) {
@@ -1479,7 +1505,7 @@ export default function RMRoles() {
                         <TrendingUp className="w-5 h-5 text-emerald-600" />
                       </div>
                     </div>
-                    <p className="text-3xl font-bold text-emerald-600">{selectedRole.status === 'deal' ? 1 : 0}</p>
+                    <p className="text-3xl font-bold text-emerald-600">{selectedRole.total_deals || 0}</p>
                     <p className="text-xs text-slate-600 mt-1 font-medium">Deals</p>
                   </div>
 
@@ -1753,82 +1779,98 @@ export default function RMRoles() {
                             </div>
                           </div>
                         )}
-                        <div className="overflow-x-auto">
-                          <table className="w-full">
-                            <thead>
-                              <tr className="border-b border-slate-200 bg-slate-50">
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Candidate</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Location</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Contract Type</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Payment</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Score (0–5)</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Submitted</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">RM Validation</th>
-                                <th className="text-left py-2 px-3 text-xs font-semibold text-slate-700">Status</th>
-                                <th className="text-right py-2 px-3 text-xs font-semibold text-slate-700">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {[...submissions.under_consideration, ...submissions.rejected].map((row) => (
-                                <tr key={row.association_id} className="border-b border-slate-100 hover:bg-slate-50">
-                                  <td className="py-2 px-3">
-                                    <div className="font-medium text-slate-900">{row.candidate_name || "Unknown"}</div>
-                                    <div className="text-xs text-slate-500">
-                                      {row.recruiter_name} · {row.recruiter_code}
+                        <div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {[...submissions.under_consideration, ...submissions.rejected].map((row) => (
+                              <div key={row.association_id} className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+                                <div className="px-4 py-3 border-b border-slate-100">
+                                  <div className="font-semibold text-slate-900">{row.candidate_name || "Unknown"}</div>
+                                  <div className="text-xs text-slate-500">
+                                    {row.recruiter_name} · {row.recruiter_code}
+                                  </div>
+                                </div>
+                                <div className="p-4 space-y-3">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="text-xs font-medium text-slate-600">Location</label>
+                                      <div className="mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50">{row.rm_location || "-"}</div>
                                     </div>
-                                  </td>
-                                  <td className="py-2 px-3 text-sm text-slate-700">{row.rm_location || "-"}</td>
-                                  <td className="py-2 px-3 text-sm text-slate-700">{row.rm_work_type || "-"}</td>
-                                  <td className="py-2 px-3 text-sm text-slate-700" title={`Contract: ${row.rm_work_type || "-"} • Unit: ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || '-'}`}>
-                                    {row.rm_rate_bill != null ? `€${Number(row.rm_rate_bill)} ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || ''}` : "-"}
-                                  </td>
-                                  <td className="py-2 px-3 text-sm text-slate-700">{(row as any).score != null ? Number((row as any).score).toFixed(2) : "-"}</td>
-                                  <td className="py-2 px-3 text-sm text-slate-700">{row.submission_date?.slice(0, 10) || "-"}</td>
-                                  <td className="py-2 px-3 text-sm text-slate-700">{row.rm_validation_status || "-"}</td>
-                                  <td className="py-2 px-3 text-sm">
-                                    {(() => {
-                                      if (row.is_discarded === 1) return <span className="px-2 py-1 text-xs rounded border border-red-200 bg-red-50 text-red-700">Discarded</span>;
-                                      if (row.association_status === "client_submitted") return <span className="px-2 py-1 text-xs rounded border border-blue-200 bg-blue-50 text-blue-700">Submitted to Client</span>;
-                                      if (row.association_status === "client_rejected") return <span className="px-2 py-1 text-xs rounded border border-gray-200 bg-gray-50 text-gray-700">Client Rejected</span>;
-                                      if (row.association_status === "deal") return <span className="px-2 py-1 text-xs rounded border border-green-200 bg-green-50 text-green-700">Deal</span>;
-                                      if (row.association_status === "submitted") return <span className="px-2 py-1 text-xs rounded border border-yellow-200 bg-yellow-50 text-yellow-700">Submitted to AM</span>;
-                                      return <span className="px-2 py-1 text-xs rounded border border-emerald-200 bg-emerald-50 text-emerald-700">In Play</span>;
-                                    })()}
-                                  </td>
-                                  <td className="py-2 px-3 text-right">
-                                    {row.is_discarded !== 1 ? (
-                                      <div className="flex items-center justify-end gap-2">
-                                        {row.association_status === 'rm_evaluation' && (
-                                          <button
-                                            onClick={() => sendToAM(selectedRole!.id, row.candidate_id!, row.submission_id, row.association_id)}
-                                            className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                                          >
-                                            Send to AM
-                                          </button>
-                                        )}
-                                        <button
-                                          className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
-                                          onClick={() => setNoteDialog({ roleId: selectedRole!.id, candidateId: row.candidate_id!, submissionId: row.submission_id })}
+                                    <div>
+                                      <label className="text-xs font-medium text-slate-600">Contract Type</label>
+                                      <div className="mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50">{row.rm_work_type || "-"}</div>
+                                    </div>
+                                    <div>
+                                      <label className="text-xs font-medium text-slate-600">Payment</label>
+                                      <div className="relative mt-1">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">€</span>
+                                        <div
+                                          className="pl-7 pr-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50"
+                                          title={`Contract: ${row.rm_work_type || "-"} • Unit: ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || '-'}`}
                                         >
-                                          Reject
-                                        </button>
-                                        <button
-                                          onClick={() => saveReview(row.submission_id)}
-                                          disabled={!row.submission_id}
-                                          className="text-xs px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1 justify-center"
-                                        >
-                                          <Save className="w-4 h-4" />
-                                          Save
-                                        </button>
+                                          {row.rm_rate_bill != null ? `${Number(row.rm_rate_bill)} ${((row.rm_work_type || '').toLowerCase() === 'payroll' ? 'annually' : (row.rm_work_type || '').toLowerCase() === 'sow' ? 'per day' : '') || ''}` : "-"}
+                                        </div>
                                       </div>
-                                    ) : (
-                                      <span className="text-xs text-slate-400">—</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                                    </div>
+                                    <div>
+                                      <label className="text-xs font-medium text-slate-600">Score (0–5)</label>
+                                      <div className="mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50">{(row as any).score != null ? Number((row as any).score).toFixed(2) : "-"}</div>
+                                    </div>
+                                    <div>
+                                      <label className="text-xs font-medium text-slate-600">Submitted</label>
+                                      <div className="mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50">{row.submission_date?.slice(0, 10) || "-"}</div>
+                                    </div>
+                                    <div>
+                                      <label className="text-xs font-medium text-slate-600">RM Validation</label>
+                                      <div className="mt-1 px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50">{row.rm_validation_status || "-"}</div>
+                                    </div>
+                                    <div className="sm:col-span-2">
+                                      <label className="text-xs font-medium text-slate-600">Status</label>
+                                      <div className="mt-1">
+                                        {(() => {
+                                          if (row.is_discarded === 1) return <span className="px-2 py-1 text-xs rounded border border-red-200 bg-red-50 text-red-700">Discarded</span>;
+                                          if (row.association_status === "client_submitted") return <span className="px-2 py-1 text-xs rounded border border-blue-200 bg-blue-50 text-blue-700">Submitted to Client</span>;
+                                          if (row.association_status === "client_rejected") return <span className="px-2 py-1 text-xs rounded border border-gray-200 bg-gray-50 text-gray-700">Client Rejected</span>;
+                                          if (row.association_status === "deal") return <span className="px-2 py-1 text-xs rounded border border-green-200 bg-green-50 text-green-700">Deal</span>;
+                                          if (row.association_status === "submitted") return <span className="px-2 py-1 text-xs rounded border border-yellow-200 bg-yellow-50 text-yellow-700">Submitted to AM</span>;
+                                          return <span className="px-2 py-1 text-xs rounded border border-emerald-200 bg-emerald-50 text-emerald-700">In Play</span>;
+                                        })()}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                                  {row.is_discarded !== 1 ? (
+                                    <>
+                                      {row.association_status === 'rm_evaluation' && (
+                                        <button
+                                          onClick={() => sendToAM(selectedRole!.id, row.candidate_id!, row.submission_id, row.association_id)}
+                                          className="text-xs px-3 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                                        >
+                                          Send to AM
+                                        </button>
+                                      )}
+                                      <button
+                                        className="text-xs px-3 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                                        onClick={() => setNoteDialog({ roleId: selectedRole!.id, candidateId: row.candidate_id!, submissionId: row.submission_id })}
+                                      >
+                                        Reject
+                                      </button>
+                                      <button
+                                        onClick={() => saveReview(row.submission_id)}
+                                        disabled={!row.submission_id}
+                                        className="text-xs px-3 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1 justify-center"
+                                      >
+                                        <Save className="w-4 h-4" />
+                                        Save
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-slate-400">—</span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}

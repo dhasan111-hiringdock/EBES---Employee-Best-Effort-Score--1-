@@ -41,6 +41,8 @@ export default function RecruiterAnalytics() {
   const [ebesData, setEbesData] = useState<EBESData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState(false);
+  const [toastText, setToastText] = useState("");
 
   // Filter states
   const [clients, setClients] = useState<Client[]>([]);
@@ -179,6 +181,135 @@ export default function RecruiterAnalytics() {
     }
   };
 
+  const [detailsOpen, setDetailsOpen] = useState<null | 'submissions' | 'interviews' | 'deals' | 'dropouts'>(null);
+  const [detailItems, setDetailItems] = useState<any[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [changeStatusItem, setChangeStatusItem] = useState<any | null>(null);
+  const [changeStatusReason, setChangeStatusReason] = useState<string>("");
+  const [changingStatus, setChangingStatus] = useState(false);
+
+  const openDetails = async (type: 'submissions' | 'interviews' | 'deals' | 'dropouts') => {
+    setDetailsOpen(type);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedClient) params.append('client_id', selectedClient);
+      if (selectedTeam) params.append('team_id', selectedTeam);
+      if (dateRange === 'custom' && customStartDate && customEndDate) {
+        params.append('start_date', customStartDate);
+        params.append('end_date', customEndDate);
+      }
+      const r = await fetchWithAuth(`/api/recruiter/submissions?${params.toString()}`);
+      if (!r.ok) {
+        const ct = r.headers.get('content-type') || '';
+        const isJson = ct.includes('application/json');
+        const data = isJson ? await r.json() : await r.text();
+        setDetailError((data as any)?.error || 'Failed to load details');
+        setDetailItems([]);
+      } else {
+        const data = await r.json();
+        const all = (data?.submissions || []) as any[];
+        let filtered: any[] = [];
+        if (type === 'submissions') {
+          filtered = all.filter((s) => s.entry_type === 'submission');
+        } else if (type === 'interviews') {
+          filtered = all.filter((s) => s.entry_type === 'interview');
+        } else if (type === 'deals') {
+          filtered = all.filter((s) => s.entry_type === 'deal');
+        } else if (type === 'dropouts') {
+          filtered = all.filter((s) => s.entry_type === 'dropout');
+        }
+        setDetailItems(filtered);
+      }
+    } catch {
+      setDetailError('Failed to load details');
+      setDetailItems([]);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleChangeStatusForDeal = (item: any) => {
+    setChangeStatusItem({ type: 'deal', item });
+    setChangeStatusReason("");
+  };
+
+  const handleReverseDropoutItem = async (item: any) => {
+    setChangingStatus(true);
+    try {
+      const resp = await fetchWithAuth(`/api/recruiter/roles/${item.role_id}/reverse-dropout`, {
+        method: "POST",
+        body: JSON.stringify({ submission_date: new Date().toISOString().split("T")[0] }),
+      });
+      if (!resp.ok) {
+        try {
+          const ct = resp.headers.get('content-type') || '';
+          const isJson = ct.includes('application/json');
+          const data = isJson ? await resp.json() : await resp.text();
+          setDetailError((data as any)?.error || 'Failed to reverse dropout');
+        } catch {
+          setDetailError('Failed to reverse dropout');
+        }
+        return;
+      }
+      setToastText("Dropout Reversed");
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 2000);
+      await fetchAnalytics();
+      if (detailsOpen) await openDetails(detailsOpen);
+    } finally {
+      setChangingStatus(false);
+    }
+  };
+
+  const submitChangeStatusForDeal = async () => {
+    if (!changeStatusItem || changeStatusItem.type !== 'deal') return;
+    const item = changeStatusItem.item;
+    if (!changeStatusReason.trim()) {
+      setDetailError('Please provide a dropout reason');
+      return;
+    }
+    setChangingStatus(true);
+    setDetailError(null);
+    try {
+      const resp = await fetchWithAuth("/api/recruiter/submissions", {
+        method: "POST",
+        body: JSON.stringify({
+          entry_type: "dropout",
+          dropout_role_id: item.role_id,
+          dropout_reason: changeStatusReason,
+          client_id: item.client_id,
+          team_id: item.team_id,
+          role_id: item.role_id,
+          submission_date: new Date().toISOString().split("T")[0],
+          notes: "",
+          candidate_name: item.candidate_name || undefined,
+        }),
+      });
+      if (!resp.ok) {
+        try {
+          const ct = resp.headers.get('content-type') || '';
+          const isJson = ct.includes('application/json');
+          const data = isJson ? await resp.json() : await resp.text();
+          setDetailError((data as any)?.error || 'Failed to change status to dropout');
+        } catch {
+          setDetailError('Failed to change status to dropout');
+        }
+        return;
+      }
+      setToastText("Status changed: Deal → Dropout");
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 2000);
+      setChangeStatusItem(null);
+      setChangeStatusReason("");
+      await fetchAnalytics();
+      if (detailsOpen) await openDetails(detailsOpen);
+    } finally {
+      setChangingStatus(false);
+    }
+  };
 
   const handleReportDownload = async (filters: ReportFilters, format: 'csv' | 'excel' | 'pdf') => {
     const selectedFields = (filters.fields && filters.fields.length > 0) ? filters.fields : [
@@ -518,6 +649,152 @@ export default function RecruiterAnalytics() {
         </div>
       </div>
 
+      {detailsOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 flex justify-between items-center rounded-t-2xl">
+              <div className="flex items-center gap-2">
+                {detailsOpen === 'submissions' && <TrendingUp className="w-6 h-6 text-white" />}
+                {detailsOpen === 'interviews' && <Users className="w-6 h-6 text-white" />}
+                {detailsOpen === 'deals' && <Award className="w-6 h-6 text-white" />}
+                {detailsOpen === 'dropouts' && <X className="w-6 h-6 text-white" />}
+                <h3 className="text-xl font-bold text-white capitalize">{detailsOpen} Details</h3>
+              </div>
+              <button
+                onClick={() => { setDetailsOpen(null); setDetailItems([]); setDetailError(null); setChangeStatusItem(null); }}
+                className="text-white hover:bg-white hover:bg-opacity-20 p-2 rounded-lg transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6">
+              {detailError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4">
+                  {detailError}
+                </div>
+              )}
+              {detailLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b-2 border-slate-200">
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Date</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Role</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Candidate</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Client</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Team</th>
+                        <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailItems.length === 0 ? (
+                        <tr><td className="py-6 px-4 text-center text-slate-500" colSpan={6}>No records</td></tr>
+                      ) : detailItems.map((it) => (
+                        <tr key={`${it.role_id}-${it.candidate_id}-${it.created_at}`} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="py-3 px-4 text-sm text-slate-700">{it.submission_date}</td>
+                          <td className="py-3 px-4">
+                            <div className="text-sm font-medium text-slate-800">{it.role_title}</div>
+                            <div className="text-xs text-slate-500">{it.role_code}</div>
+                          </td>
+                          <td className="py-3 px-4 text-sm text-slate-700">{it.candidate_name || '—'}</td>
+                          <td className="py-3 px-4 text-sm text-slate-700">{it.client_name}</td>
+                          <td className="py-3 px-4 text-sm text-slate-700">{it.team_name}</td>
+                          <td className="py-3 px-4 text-center">
+                            {detailsOpen === 'deals' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleChangeStatusForDeal(it)}
+                                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-medium"
+                              >
+                                Change Status
+                              </button>
+                            ) : detailsOpen === 'dropouts' ? (
+                              <button
+                                type="button"
+                                disabled={changingStatus}
+                                onClick={() => handleReverseDropoutItem(it)}
+                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {changingStatus ? "Processing..." : "Reverse"}
+                              </button>
+                            ) : (
+                              <span className="text-slate-400 text-xs">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {changeStatusItem && changeStatusItem.type === 'deal' && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[70]">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800">Change Status: Deal → Dropout</h3>
+              <button
+                onClick={() => { setChangeStatusItem(null); setChangeStatusReason(""); }}
+                className="text-slate-600 hover:bg-slate-100 p-2 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="text-sm text-slate-700">
+                <div className="font-medium">{changeStatusItem.item.role_title}</div>
+                <div className="text-slate-500">{changeStatusItem.item.role_code}</div>
+                <div className="mt-1 text-slate-600">Candidate: {changeStatusItem.item.candidate_name || '—'}</div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Dropout Reason *</label>
+                <textarea
+                  value={changeStatusReason}
+                  onChange={(e) => setChangeStatusReason(e.target.value)}
+                  rows={3}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  placeholder="Enter reason to change status from deal to dropout"
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setChangeStatusItem(null); setChangeStatusReason(""); }}
+                  className="px-4 py-2 border-2 border-slate-300 rounded-lg text-slate-700 font-medium hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={changingStatus}
+                  onClick={submitChangeStatusForDeal}
+                  className="px-4 py-2 bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {changingStatus ? "Submitting..." : "Confirm Change"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showToast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[1000]">
+          <div className="px-4 py-2 bg-emerald-600 text-white rounded-lg shadow-lg flex items-center gap-2">
+            <CheckCircle className="w-5 h-5" />
+            <span>{toastText || "Success"}</span>
+          </div>
+        </div>
+      )}
       {/* Filters Section */}
       <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -658,9 +935,14 @@ export default function RecruiterAnalytics() {
                 {analytics?.total_submissions || 0}
               </p>
             </div>
-            <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => openDetails('submissions')}
+              className="w-12 h-12 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center hover:opacity-90 active:opacity-80"
+              title="View submission details"
+            >
               <TrendingUp className="w-6 h-6 text-white" />
-            </div>
+            </button>
           </div>
         </div>
 
@@ -672,9 +954,14 @@ export default function RecruiterAnalytics() {
                 {analytics?.total_interviews || 0}
               </p>
             </div>
-            <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => openDetails('interviews')}
+              className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center hover:opacity-90 active:opacity-80"
+              title="View interview details"
+            >
               <Users className="w-6 h-6 text-white" />
-            </div>
+            </button>
           </div>
           <div className="mt-4 flex gap-4 text-xs">
             <span className="text-slate-500">1st: {analytics?.interview_1 || 0}</span>
@@ -709,9 +996,14 @@ export default function RecruiterAnalytics() {
                 {analytics?.total_deals || 0}
               </p>
             </div>
-            <div className="w-12 h-12 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => openDetails('deals')}
+              className="w-12 h-12 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center hover:opacity-90 active:opacity-80"
+              title="View deals details"
+            >
               <Award className="w-6 h-6 text-white" />
-            </div>
+            </button>
           </div>
         </div>
 
@@ -723,9 +1015,14 @@ export default function RecruiterAnalytics() {
                 {analytics?.total_dropouts || 0}
               </p>
             </div>
-            <div className="w-12 h-12 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => openDetails('dropouts')}
+              className="w-12 h-12 bg-gradient-to-r from-red-500 to-orange-500 rounded-xl flex items-center justify-center hover:opacity-90 active:opacity-80"
+              title="View dropouts details"
+            >
               <X className="w-6 h-6 text-white" />
-            </div>
+            </button>
           </div>
         </div>
       </div>

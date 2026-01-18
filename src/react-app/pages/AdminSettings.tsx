@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Settings, Info, Users, Target, Building2, UsersRound, BarChart3 } from 'lucide-react';
+import { Settings, Info, Users, Target, Building2, UsersRound, BarChart3, Trash2 } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
 
 export default function AdminSettings() {
@@ -11,6 +11,9 @@ export default function AdminSettings() {
   const [showClientStats, setShowClientStats] = useState(true);
   const [showTeamStats, setShowTeamStats] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [purgeName, setPurgeName] = useState('');
+  const [purging, setPurging] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<any | null>(null);
 
   useEffect(() => {
     fetchSettings();
@@ -158,6 +161,31 @@ export default function AdminSettings() {
     </button>
   );
 
+  const handlePurgeCandidate = async () => {
+    const name = purgeName.trim();
+    if (!name) return;
+    const ok = window.confirm(`This will permanently remove all data for "${name}". Continue?`);
+    if (!ok) return;
+    try {
+      setPurging(true);
+      setPurgeResult(null);
+      const res = await fetchWithAuth('/api/admin/system/purge-candidate', {
+        method: 'POST',
+        body: JSON.stringify({ candidate_name: name }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPurgeResult(data);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setPurgeResult({ error: err?.error || 'Failed to purge candidate' });
+      }
+    } catch {
+      setPurgeResult({ error: 'Failed to purge candidate' });
+    } finally {
+      setPurging(false);
+    }
+  };
   return (
     <div className="space-y-6">
       <div>
@@ -374,6 +402,50 @@ export default function AdminSettings() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-rose-500 rounded-xl flex items-center justify-center">
+            <Trash2 className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h3 className="text-xl font-bold text-slate-800">Data Cleanup</h3>
+            <p className="text-sm text-slate-500">Remove all records related to a candidate by exact name</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-3">
+          <input
+            type="text"
+            value={purgeName}
+            onChange={(e) => setPurgeName(e.target.value)}
+            placeholder="Enter candidate full name (e.g., Jennifer Kohler)"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-300"
+          />
+          <button
+            onClick={handlePurgeCandidate}
+            disabled={purging || purgeName.trim().length === 0}
+            className={`px-4 py-2 rounded-lg text-white ${purging ? 'bg-slate-400' : 'bg-red-600 hover:bg-red-700'}`}
+          >
+            {purging ? 'Purging...' : 'Purge Candidate Data'}
+          </button>
+        </div>
+        {purgeResult && (
+          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            {'error' in purgeResult ? (
+              <p className="text-red-600 text-sm">{purgeResult.error}</p>
+            ) : (
+              <div className="text-sm text-slate-700">
+                <div className="flex gap-6">
+                  <div>Candidate: <span className="font-semibold">{purgeResult.candidate_name}</span></div>
+                  <div>Deleted Candidates: <span className="font-semibold">{purgeResult.deleted_candidates}</span></div>
+                  <div>Deleted Associations: <span className="font-semibold">{purgeResult.deleted_role_associations}</span></div>
+                  <div>Deleted Submissions: <span className="font-semibold">{purgeResult.deleted_recruiter_submissions}</span></div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Info Box */}

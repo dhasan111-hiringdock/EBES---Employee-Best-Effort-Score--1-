@@ -24,6 +24,7 @@ export default function DropoutDecisions() {
   const [decision, setDecision] = useState<'accept' | 'ignore' | null>(null);
   const [newStatus, setNewStatus] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
+  const [reversing, setReversing] = useState(false);
 
   useEffect(() => {
     fetchRequests();
@@ -40,6 +41,39 @@ export default function DropoutDecisions() {
       console.error('Failed to fetch dropout requests:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleReverseToDeal = async () => {
+    if (!selectedRequest) return;
+    setReversing(true);
+    try {
+      const response = await fetchWithAuth(`/api/am/dropout-requests/${selectedRequest.id}/reverse-to-deal`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ submission_date: new Date().toISOString().split('T')[0] }),
+      });
+      if (response.ok) {
+        setRequests(prev => prev.filter(r => r.id !== selectedRequest.id));
+        setSelectedRequest(null);
+        setDecision(null);
+        setNewStatus('');
+      } else {
+        try {
+          const ct = response.headers.get('content-type') || '';
+          const isJson = ct.includes('application/json');
+          const data = isJson ? await response.json() : await response.text();
+          const msg = isJson ? (data as any)?.error || 'Failed to reverse dropout to deal' : (data || 'Failed to reverse dropout to deal');
+          alert(msg);
+        } catch {
+          alert('Failed to reverse dropout to deal');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to reverse:', error);
+      alert('Failed to reverse dropout to deal');
+    } finally {
+      setReversing(false);
     }
   };
 
@@ -316,14 +350,14 @@ export default function DropoutDecisions() {
                   setDecision(null);
                   setNewStatus('');
                 }}
-                disabled={submitting}
+                disabled={submitting || reversing}
                 className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDecide}
-                disabled={submitting || !decision}
+                disabled={submitting || reversing || !decision}
                 className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {submitting ? (
@@ -333,6 +367,20 @@ export default function DropoutDecisions() {
                   </>
                 ) : (
                   'Confirm Decision'
+                )}
+              </button>
+              <button
+                onClick={handleReverseToDeal}
+                disabled={reversing || submitting}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {reversing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    Reversing...
+                  </>
+                ) : (
+                  'Reverse to Deal'
                 )}
               </button>
             </div>

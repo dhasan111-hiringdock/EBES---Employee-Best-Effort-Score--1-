@@ -1985,4 +1985,306 @@ app.get("/api/system/tables", async (c) => {
   }
 });
 
+app.post("/api/admin/migrations/backfill-candidate-id", adminOnly, async (c) => {
+  const db = c.env.DB;
+  try {
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const hasCandidateId = (tableInfo.results || []).some((r: any) => (r as any).name === "candidate_id");
+    if (!hasCandidateId) {
+      await db.prepare("ALTER TABLE recruiter_submissions ADD COLUMN candidate_id INTEGER").run();
+    }
+    await db.prepare(`
+      UPDATE recruiter_submissions
+      SET candidate_id = (
+        SELECT c.id
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        WHERE cra.role_id = recruiter_submissions.role_id
+          AND cra.recruiter_user_id = recruiter_submissions.recruiter_user_id
+          AND cra.is_discarded = 0
+          AND LOWER(TRIM(c.name)) = LOWER(TRIM(recruiter_submissions.candidate_name))
+        LIMIT 1
+      )
+      WHERE candidate_id IS NULL AND candidate_name IS NOT NULL
+    `).run();
+    await db.prepare(`
+      UPDATE recruiter_submissions
+      SET candidate_id = (
+        SELECT c.id
+        FROM candidates c
+        WHERE c.created_by_user_id = recruiter_submissions.recruiter_user_id
+          AND LOWER(TRIM(c.name)) = LOWER(TRIM(recruiter_submissions.candidate_name))
+        LIMIT 1
+      )
+      WHERE candidate_id IS NULL AND candidate_name IS NOT NULL
+    `).run();
+    await db.prepare(`
+      UPDATE recruiter_submissions
+      SET candidate_id = (
+        SELECT c.id
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        WHERE cra.role_id = recruiter_submissions.dropout_role_id
+          AND cra.recruiter_user_id = recruiter_submissions.recruiter_user_id
+          AND cra.is_discarded = 0
+          AND LOWER(TRIM(c.name)) = LOWER(TRIM(recruiter_submissions.candidate_name))
+        LIMIT 1
+      )
+      WHERE candidate_id IS NULL AND candidate_name IS NOT NULL AND entry_type = 'dropout' AND dropout_role_id IS NOT NULL
+    `).run();
+    const updatedCountRow = await db.prepare("SELECT COUNT(*) as c FROM recruiter_submissions WHERE candidate_id IS NOT NULL").first();
+    return c.json({ success: true, updated_rows: Number((updatedCountRow as any)?.c || 0) });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to backfill candidate_id" }, 500);
+  }
+});
+
+// Purge all data related to a candidate by name (global)
+app.post("/api/admin/system/purge-candidate", adminOnly, async (c) => {
+  const db = c.env.DB;
+  try {
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {}
+    const candidateNameInput = (body?.candidate_name || body?.name || "").toString().trim();
+    if (!candidateNameInput) {
+      return c.json({ error: "candidate_name required" }, 400);
+    }
+    const candidateNameNorm = candidateNameInput.toLowerCase();
+    const rows = await db
+      .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))")
+      .bind(candidateNameInput)
+      .all();
+    const ids = (rows.results || []).map((r: any) => (r as any).id);
+    let deletedCRA = 0;
+    let deletedSubs = 0;
+    let deletedCandidates = 0;
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => "?").join(",");
+      const craRes = await db
+        .prepare(`DELETE FROM candidate_role_associations WHERE candidate_id IN (${placeholders})`)
+        .bind(...ids)
+        .run();
+      deletedCRA += Number(craRes?.meta?.changes || 0);
+      const subsRes = await db
+        .prepare(`DELETE FROM recruiter_submissions WHERE candidate_id IN (${placeholders})`)
+        .bind(...ids)
+        .run();
+      deletedSubs += Number(subsRes?.meta?.changes || 0);
+      const candRes = await db
+        .prepare(`DELETE FROM candidates WHERE id IN (${placeholders})`)
+        .bind(...ids)
+        .run();
+      deletedCandidates += Number(candRes?.meta?.changes || 0);
+    }
+    // Also remove any submissions that only store candidate_name
+    const subsNameRes = await db
+      .prepare(`
+        DELETE FROM recruiter_submissions
+        WHERE LOWER(TRIM(candidate_name)) = ?
+      `)
+      .bind(candidateNameNorm)
+      .run();
+    deletedSubs += Number(subsNameRes?.meta?.changes || 0);
+    if (deletedCandidates === 0 && deletedCRA === 0 && deletedSubs === 0) {
+      const parts = candidateNameInput.split(/\s+/).filter((p: string) => p.length > 0);
+      if (parts.length >= 2) {
+        const first = parts[0];
+        const last = parts[parts.length - 1];
+        const firstPat = first.slice(0, Math.min(3, first.length));
+        const lastPat = last.slice(0, Math.min(3, last.length));
+        const likePattern = `${firstPat}% ${lastPat}%`.toLowerCase();
+        const candRows = await db
+          .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) LIKE LOWER(TRIM(?))")
+          .bind(likePattern)
+          .all();
+        const likeIds = (candRows.results || []).map((r: any) => (r as any).id);
+        if (likeIds.length > 0) {
+          const placeholders = likeIds.map(() => "?").join(",");
+          const craRes2 = await db
+            .prepare(`DELETE FROM candidate_role_associations WHERE candidate_id IN (${placeholders})`)
+            .bind(...likeIds)
+            .run();
+          deletedCRA += Number(craRes2?.meta?.changes || 0);
+          const subsRes2 = await db
+            .prepare(`DELETE FROM recruiter_submissions WHERE candidate_id IN (${placeholders})`)
+            .bind(...likeIds)
+            .run();
+          deletedSubs += Number(subsRes2?.meta?.changes || 0);
+          const candRes2 = await db
+            .prepare(`DELETE FROM candidates WHERE id IN (${placeholders})`)
+            .bind(...likeIds)
+            .run();
+          deletedCandidates += Number(candRes2?.meta?.changes || 0);
+        }
+        const subsNameRes2 = await db
+          .prepare(`
+            DELETE FROM recruiter_submissions
+            WHERE LOWER(TRIM(candidate_name)) LIKE LOWER(TRIM(?))
+          `)
+          .bind(likePattern)
+          .run();
+        deletedSubs += Number(subsNameRes2?.meta?.changes || 0);
+      }
+    }
+    return c.json({
+      success: true,
+      candidate_name: candidateNameInput,
+      deleted_candidates: deletedCandidates,
+      deleted_role_associations: deletedCRA,
+      deleted_recruiter_submissions: deletedSubs,
+    });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to purge candidate" }, 500);
+  }
+});
+
+app.post("/api/system/fix/association-status", async (c) => {
+  const db = c.env.DB;
+  const devAllowed = c.req.header("x-dev-allow") === "1";
+  if (!devAllowed) {
+    return c.json({ error: "Disabled in production" }, 403);
+  }
+  const schema = z.object({
+    candidate_name: z.string(),
+    role_id: z.number().optional(),
+    role_code: z.string().optional(),
+    new_status: z.enum(["rm_evaluation", "submitted", "client_submitted", "client_rejected"]),
+  });
+  try {
+    const body = await c.req.json();
+    const data = schema.parse(body);
+    const candidateRows = await db
+      .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))")
+      .bind(data.candidate_name)
+      .all();
+    const candidateIds = (candidateRows.results || []).map((r: any) => (r as any).id);
+    if (candidateIds.length === 0) {
+      return c.json({ error: "Candidate not found" }, 404);
+    }
+    let roleId = data.role_id || null;
+    if (!roleId && data.role_code) {
+      const roleRow = await db
+        .prepare("SELECT id FROM am_roles WHERE role_code = ?")
+        .bind(data.role_code)
+        .first();
+      roleId = roleRow ? (roleRow as any).id : null;
+    }
+    const placeholders = candidateIds.map(() => "?").join(",");
+    let where = `candidate_id IN (${placeholders}) AND is_discarded = 0 AND status = 'deal'`;
+    const params: any[] = [...candidateIds];
+    if (roleId) {
+      where += " AND role_id = ?";
+      params.push(roleId);
+    }
+    const assocRows = await db
+      .prepare(`SELECT id, role_id FROM candidate_role_associations WHERE ${where}`)
+      .bind(...params)
+      .all();
+    const assocs = assocRows.results || [];
+    if (assocs.length === 0) {
+      return c.json({ error: "No matching associations with status 'deal'" }, 404);
+    }
+    const assocIds = assocs.map((r: any) => (r as any).id);
+    const roleIds = Array.from(new Set(assocs.map((r: any) => (r as any).role_id)));
+    const updatePlaceholders = assocIds.map(() => "?").join(",");
+    await db
+      .prepare(`UPDATE candidate_role_associations SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${updatePlaceholders})`)
+      .bind(data.new_status, ...assocIds)
+      .run();
+    let rolesReverted = 0;
+    for (const rid of roleIds) {
+      const stillDeal = await db
+        .prepare("SELECT 1 FROM candidate_role_associations WHERE role_id = ? AND is_discarded = 0 AND status = 'deal' LIMIT 1")
+        .bind(rid)
+        .first();
+      if (!stillDeal) {
+        const roleRow = await db
+          .prepare("SELECT status FROM am_roles WHERE id = ?")
+          .bind(rid)
+          .first();
+        if (roleRow && (roleRow as any).status === "deal") {
+          await db.prepare("UPDATE am_roles SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(rid).run();
+          rolesReverted++;
+        }
+      }
+    }
+    return c.json({ success: true, updated_associations: assocIds.length, roles_reverted: rolesReverted, association_ids: assocIds, role_ids: roleIds });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to fix association status" }, 500);
+  }
+});
+
+app.post("/api/admin/system/change-association-status", adminOnly, async (c) => {
+  const db = c.env.DB;
+  const schema = z.object({
+    candidate_name: z.string(),
+    role_id: z.number().optional(),
+    role_code: z.string().optional(),
+    new_status: z.enum(["rm_evaluation", "submitted", "client_submitted", "client_rejected"]),
+  });
+  try {
+    const body = await c.req.json();
+    const data = schema.parse(body);
+    const candidateRows = await db
+      .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))")
+      .bind(data.candidate_name)
+      .all();
+    const candidateIds = (candidateRows.results || []).map((r: any) => (r as any).id);
+    if (candidateIds.length === 0) {
+      return c.json({ error: "Candidate not found" }, 404);
+    }
+    let roleId = data.role_id || null;
+    if (!roleId && data.role_code) {
+      const roleRow = await db
+        .prepare("SELECT id FROM am_roles WHERE role_code = ?")
+        .bind(data.role_code)
+        .first();
+      roleId = roleRow ? (roleRow as any).id : null;
+    }
+    const placeholders = candidateIds.map(() => "?").join(",");
+    let where = `candidate_id IN (${placeholders}) AND is_discarded = 0 AND status = 'deal'`;
+    const params: any[] = [...candidateIds];
+    if (roleId) {
+      where += " AND role_id = ?";
+      params.push(roleId);
+    }
+    const assocRows = await db
+      .prepare(`SELECT id, role_id FROM candidate_role_associations WHERE ${where}`)
+      .bind(...params)
+      .all();
+    const assocs = assocRows.results || [];
+    if (assocs.length === 0) {
+      return c.json({ error: "No matching associations with status 'deal'" }, 404);
+    }
+    const assocIds = assocs.map((r: any) => (r as any).id);
+    const roleIds = Array.from(new Set(assocs.map((r: any) => (r as any).role_id)));
+    const updatePlaceholders = assocIds.map(() => "?").join(",");
+    await db
+      .prepare(`UPDATE candidate_role_associations SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN (${updatePlaceholders})`)
+      .bind(data.new_status, ...assocIds)
+      .run();
+    let rolesReverted = 0;
+    for (const rid of roleIds) {
+      const stillDeal = await db
+        .prepare("SELECT 1 FROM candidate_role_associations WHERE role_id = ? AND is_discarded = 0 AND status = 'deal' LIMIT 1")
+        .bind(rid)
+        .first();
+      if (!stillDeal) {
+        const roleRow = await db
+          .prepare("SELECT status FROM am_roles WHERE id = ?")
+          .bind(rid)
+          .first();
+        if (roleRow && (roleRow as any).status === "deal") {
+          await db.prepare("UPDATE am_roles SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(rid).run();
+          rolesReverted++;
+        }
+      }
+    }
+    return c.json({ success: true, updated_associations: assocIds.length, roles_reverted: rolesReverted, association_ids: assocIds, role_ids: roleIds });
+  } catch (error: any) {
+    return c.json({ error: error?.message || "Failed to change association status" }, 500);
+  }
+});
 export default app;

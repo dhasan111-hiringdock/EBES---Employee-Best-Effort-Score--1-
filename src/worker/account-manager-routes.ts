@@ -268,6 +268,17 @@ app.get("/api/am/roles", amOnly, async (c) => {
           .bind(role.id)
           .first();
 
+        const latestDeal = await db
+          .prepare(`
+            SELECT candidate_name, submission_date
+            FROM recruiter_submissions
+            WHERE role_id = ? AND entry_type = 'deal'
+            ORDER BY submission_date DESC, created_at DESC
+            LIMIT 1
+          `)
+          .bind(role.id)
+          .first();
+
         // Get additional team assignments
         const additionalTeams = await db
           .prepare(`
@@ -313,6 +324,19 @@ app.get("/api/am/roles", amOnly, async (c) => {
           pending_dropout_reason: pendingStatus ? (pendingStatus as any).reason : null,
           has_dropout: !!dropoutRequest,
           dropout_decision: dropoutRequest ? (dropoutRequest as any).am_decision : null,
+          closing_reason: (role as any).closing_reason ?? (
+            role.status === "lost"
+              ? (dropoutRequest ? (dropoutRequest as any).dropout_reason || null : null)
+              : role.status === "deal"
+              ? (latestDeal ? `Deal closed with ${(latestDeal as any).candidate_name}` : null)
+              : role.status === "on_hold"
+              ? "Role on hold"
+              : role.status === "cancelled"
+              ? "Role cancelled"
+              : role.status === "no_answer"
+              ? "Client not responding"
+              : null
+          ),
           additional_teams: additionalTeams.results || [],
         };
       })
@@ -549,6 +573,7 @@ app.put("/api/am/roles/:id", amOnly, async (c) => {
     team_ids: z.array(z.number()).optional(),
     status: z.enum(["active", "lost", "deal", "on_hold", "cancelled", "no_answer"]).optional(),
     clear_pending_dropout: z.boolean().optional(),
+    closing_reason: z.string().optional(),
   });
 
   try {
@@ -586,6 +611,18 @@ app.put("/api/am/roles/:id", amOnly, async (c) => {
     if (data.status !== undefined) {
       updates.push("status = ?");
       values.push(data.status);
+    }
+    const tableInfo = await db.prepare("PRAGMA table_info(am_roles)").all();
+    const hasClosingReason = (tableInfo.results || []).some((r: any) => (r as any).name === "closing_reason");
+    if (!hasClosingReason) {
+      try {
+        await db.prepare("ALTER TABLE am_roles ADD COLUMN closing_reason TEXT").run();
+      } catch {}
+    }
+    const closingReasonVal = data.closing_reason !== undefined ? data.closing_reason : (data.status === 'active' ? null : undefined);
+    if (closingReasonVal !== undefined) {
+      updates.push("closing_reason = ?");
+      values.push(closingReasonVal);
     }
 
     if (updates.length === 0 && !data.clear_pending_dropout && !data.team_ids) {
@@ -1633,17 +1670,13 @@ app.put("/api/am/dropout-requests/:id/decide", amOnly, async (c) => {
       .bind(decision, new_role_status || null, requestId)
       .run();
 
-    // Update role status based on decision
     if (decision === 'accept') {
-      // Accept: keep role active for rework unless AM explicitly sets a non-active status
-      const proposed = new_role_status || 'active';
+      const proposed = new_role_status || 'lost';
       const finalStatus = proposed === 'dropout' ? 'active' : proposed;
       await db
         .prepare("UPDATE am_roles SET status = ?, updated_at = datetime('now') WHERE id = ?")
         .bind(finalStatus, req.role_id)
         .run();
-      
-      // Notify recruiter about accepted dropout
       await createNotification(db, {
         userId: req.recruiter_user_id,
         type: 'dropout',
@@ -1653,15 +1686,12 @@ app.put("/api/am/dropout-requests/:id/decide", amOnly, async (c) => {
         relatedEntityId: req.role_id
       });
     } else if (decision === 'ignore') {
-      // Ignore: keep role active for rework unless AM explicitly sets a non-active status
       const proposed = new_role_status || 'active';
       const finalStatus = proposed === 'dropout' ? 'active' : proposed;
       await db
         .prepare("UPDATE am_roles SET status = ?, updated_at = datetime('now') WHERE id = ?")
         .bind(finalStatus, req.role_id)
         .run();
-      
-      // Notify recruiter about ignored dropout
       await createNotification(db, {
         userId: req.recruiter_user_id,
         type: 'system',
@@ -1688,6 +1718,265 @@ app.put("/api/am/dropout-requests/:id/decide", amOnly, async (c) => {
   } catch (error) {
     console.error("Error deciding on dropout:", error);
     return c.json({ error: "Failed to process decision" }, 500);
+  }
+});
+
+// AM reverses a dropout to a deal for the underlying candidate-role
+app.put("/api/am/dropout-requests/:id/reverse-to-deal", amOnly, async (c) => {
+  const db = c.env.DB;
+  const amUser = c.get("amUser");
+  const requestId = c.req.param("id");
+  const { submission_date } = await c.req.json().catch(() => ({ submission_date: new Date().toISOString().split("T")[0] }));
+
+  try {
+    // Verify request belongs to this AM
+    const request = await db
+      .prepare("SELECT * FROM dropout_requests WHERE id = ? AND am_user_id = ?")
+      .bind(requestId, (amUser as any).id)
+      .first();
+
+    if (!request) {
+      return c.json({ error: "Dropout request not found" }, 404);
+    }
+
+    const req = request as any;
+
+    // Get role details
+    const role = await db
+      .prepare("SELECT * FROM am_roles WHERE id = ?")
+      .bind(req.role_id)
+      .first();
+    if (!role) {
+      return c.json({ error: "Role not found" }, 404);
+    }
+    const clientId = (role as any).client_id;
+    const teamId = (role as any).team_id;
+
+    // Find most recent recruiter_submissions dropout entry to identify candidate
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    let candidateRow = await db
+      .prepare(`
+        SELECT candidate_id, candidate_name 
+        FROM recruiter_submissions 
+        WHERE role_id = ? AND recruiter_user_id = ? AND entry_type = 'dropout'
+        ORDER BY submission_date DESC, created_at DESC
+        LIMIT 1
+      `)
+      .bind(req.role_id, req.recruiter_user_id)
+      .first();
+    if (!candidateRow) {
+      candidateRow = await db
+        .prepare(`
+          SELECT candidate_id, candidate_name, recruiter_user_id
+          FROM recruiter_submissions 
+          WHERE role_id = ? AND entry_type = 'dropout'
+          ORDER BY submission_date DESC, created_at DESC
+          LIMIT 1
+        `)
+        .bind(req.role_id)
+        .first();
+      if (!candidateRow) {
+        return c.json({ error: "No dropout found for this role" }, 404);
+      }
+      // If we fell back across recruiters, use the recruiter from the latest dropout
+      req.recruiter_user_id = (candidateRow as any).recruiter_user_id;
+    }
+
+    const candidateId = candidateRow ? (candidateRow as any).candidate_id : null;
+    const candidateName = candidateRow ? (candidateRow as any).candidate_name : null;
+
+    if (!candidateId && (!candidateName || String(candidateName).trim().length === 0)) {
+      return c.json({ error: "Unable to determine candidate for reversal" }, 400);
+    }
+
+    // Ensure candidate exists by name if candidate_id missing
+    let finalCandidateId = candidateId;
+    if (!finalCandidateId && candidateName) {
+      const cand = await db
+        .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))")
+        .bind(candidateName.trim())
+        .first();
+      finalCandidateId = cand ? (cand as any).id : null;
+    }
+    // If candidate still not found, create one using code counter and provided name
+    if (!finalCandidateId && candidateName) {
+      const counterRow = await db
+        .prepare("SELECT next_number FROM code_counters WHERE category = 'candidate'")
+        .first();
+      let nextNumber = 1;
+      if (counterRow) {
+        nextNumber = (counterRow as any).next_number;
+        await db
+          .prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = 'candidate'")
+          .run();
+      } else {
+        await db
+          .prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 2)")
+          .run();
+      }
+      const candidateCode = `NL-${String(nextNumber).padStart(4, '0')}`;
+      const insertRes = await db
+        .prepare(`
+          INSERT INTO candidates (candidate_code, name, email, phone, is_active, created_by_user_id, created_at, updated_at)
+          VALUES (?, ?, NULL, NULL, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind(candidateCode, String(candidateName).trim(), req.recruiter_user_id)
+        .run();
+      finalCandidateId = insertRes.meta.last_row_id;
+    }
+    if (!finalCandidateId) {
+      return c.json({ error: "Candidate record not found" }, 404);
+    }
+
+    // Update or create candidate-role association as deal
+    const existingAssoc = await db
+      .prepare(`
+        SELECT id 
+        FROM candidate_role_associations
+        WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0
+        LIMIT 1
+      `)
+      .bind(req.role_id, finalCandidateId)
+      .first();
+
+    if (existingAssoc) {
+      await db
+        .prepare(`
+          UPDATE candidate_role_associations
+          SET status = 'deal', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `)
+        .bind((existingAssoc as any).id)
+        .run();
+    } else {
+      await db
+        .prepare(`
+          INSERT INTO candidate_role_associations (
+            candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'deal', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind(finalCandidateId, req.role_id, req.recruiter_user_id, clientId, teamId, submission_date)
+        .run();
+    }
+
+    // Insert a recruiter_submissions entry to audit the reversal as a deal
+    const cols = (tableInfo.results || []).map((r: any) => (r as any).name);
+    const valueMap: Record<string, any> = {
+      recruiter_user_id: req.recruiter_user_id,
+      client_id: clientId,
+      team_id: teamId,
+      role_id: req.role_id,
+      account_manager_id: (amUser as any).id,
+      recruitment_manager_id: null,
+      submission_type: '24h',
+      submission_date: submission_date,
+      candidate_name: candidateName,
+      candidate_id: finalCandidateId,
+      notes: 'Reversed dropout → deal by AM',
+      entry_type: 'deal',
+      interview_level: null,
+      dropout_role_id: null,
+      dropout_reason: null,
+      cv_match_percent: null
+    };
+    const insertCols = [
+      'recruiter_user_id',
+      'client_id',
+      'team_id',
+      'role_id',
+      'account_manager_id',
+      'recruitment_manager_id',
+      'submission_type',
+      'submission_date',
+      'candidate_name',
+      'candidate_id',
+      'notes',
+      'entry_type',
+      'interview_level',
+      'dropout_role_id',
+      'dropout_reason',
+      'cv_match_percent'
+    ].filter((cname) => cols.includes(cname));
+    const placeholders = insertCols.map(() => '?').join(', ');
+    await db
+      .prepare(`INSERT INTO recruiter_submissions (${insertCols.join(', ')}) VALUES (${placeholders})`)
+      .bind(...insertCols.map((cname) => valueMap[cname]))
+      .run();
+
+    // Remove any existing dropout submissions for this role and candidate
+    await db
+      .prepare(`
+        DELETE FROM recruiter_submissions
+        WHERE recruiter_user_id = ?
+          AND role_id = ?
+          AND entry_type = 'dropout'
+          AND (
+            candidate_id = ?
+            OR (candidate_id IS NULL AND LOWER(TRIM(candidate_name)) = LOWER(TRIM(?)))
+          )
+      `)
+      .bind(req.recruiter_user_id, req.role_id, finalCandidateId, candidateName || '')
+      .run();
+    const latestDropout = await db
+      .prepare(`
+        SELECT id
+        FROM recruiter_submissions
+        WHERE recruiter_user_id = ?
+          AND role_id = ?
+          AND entry_type = 'dropout'
+        ORDER BY submission_date DESC, created_at DESC
+        LIMIT 1
+      `)
+      .bind(req.recruiter_user_id, req.role_id)
+      .first();
+    if (latestDropout) {
+      await db.prepare("DELETE FROM recruiter_submissions WHERE id = ?").bind((latestDropout as any).id).run();
+    }
+
+    // Update role status to deal
+    await db
+      .prepare("UPDATE am_roles SET status = 'deal', updated_at = datetime('now') WHERE id = ?")
+      .bind(req.role_id)
+      .run();
+
+    // Update dropout_request to completed and mark decision as 'ignore'
+    await db
+      .prepare(`
+        UPDATE dropout_requests
+        SET am_decision = 'ignore',
+            am_new_role_status = 'deal',
+            am_decided_at = datetime('now'),
+            final_status = 'completed',
+            updated_at = datetime('now')
+        WHERE id = ?
+      `)
+      .bind(requestId)
+      .run();
+
+    // Notify recruiter and RM (if present)
+    await createNotification(db, {
+      userId: req.recruiter_user_id,
+      type: 'deal',
+      title: 'Dropout Reversed to Deal',
+      message: `AM reversed a dropout to deal for role ${(role as any).title}.`,
+      relatedEntityType: 'role',
+      relatedEntityId: req.role_id
+    });
+    if (req.rm_user_id) {
+      await createNotification(db, {
+        userId: req.rm_user_id,
+        type: 'system',
+        title: 'Dropout Reversed',
+        message: `AM reversed a dropout to deal for role ${(role as any).title}.`,
+        relatedEntityType: 'role',
+        relatedEntityId: req.role_id
+      });
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error reversing dropout:", error);
+    return c.json({ error: "Failed to reverse dropout" }, 500);
   }
 });
 

@@ -27,6 +27,7 @@ interface Role {
   client_rejected?: number;
   has_dropout?: boolean;
   dropout_decision?: string;
+  closing_reason?: string | null;
 }
 
 interface RoleManagementProps {
@@ -331,6 +332,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Role Code</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Title</th>
                     <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Status</th>
+                    <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700">Reason</th>
                     <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Int 1</th>
                     <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Int 2</th>
                     <th className="text-center py-3 px-4 text-sm font-semibold text-gray-700">Int 3</th>
@@ -382,6 +384,9 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
                            role.status === "no_answer" ? "No Answer" :
                            role.status}
                         </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="text-sm text-gray-700">{role.closing_reason || "-"}</p>
                       </td>
                       <td className="text-center py-3 px-4 font-semibold text-gray-700">
                         {role.interview_1_count}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Briefcase, Calendar, TrendingUp, XCircle, FileText } from "lucide-react";
+import { X, Briefcase, Calendar, TrendingUp, XCircle, FileText, CheckCircle } from "lucide-react";
 import { fetchWithAuth } from "@/react-app/utils/api";
 
 interface Role {
@@ -48,6 +48,9 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
   const [showInterviewsOnly, setShowInterviewsOnly] = useState(true);
   const [showAllRecruiters, setShowAllRecruiters] = useState(true);
   const [totalSubmissions, setTotalSubmissions] = useState<number>(0);
+  const [showToast, setShowToast] = useState(false);
+  const [toastText, setToastText] = useState("");
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState<number | null>(null);
   
   // Dropdown role selection modal
   const [showDropoutModal, setShowDropoutModal] = useState(false);
@@ -84,11 +87,27 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
       try {
         const interviewed = entryType === "deal" && showInterviewsOnly ? "interviewed_only=1" : "";
         const scope = showAllRecruiters ? "scope=all" : "";
-        const qp = [interviewed, scope].filter(Boolean).join("&");
+        const onlyDeal = entryType === "dropout" ? "only_deal=1" : "";
+        const qp = [interviewed, scope, onlyDeal].filter(Boolean).join("&");
         const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates${qp ? `?${qp}` : ""}`);
         if (resp.ok) {
           const data = await resp.json();
           let list = data as Array<{ association_id?: number; candidate_id: number; candidate_code: string; candidate_name: string; association_status: string; recruiter_name?: string; recruiter_code?: string }>;
+          if (entryType === "dropout" && Array.isArray(list) && list.length === 0 && client) {
+            const subs = await fetchWithAuth(`/api/recruiter/submissions?client_id=${client.id}`);
+            if (subs.ok) {
+              const subsData = await subs.json();
+              const dealsForRole = (subsData?.submissions || []).filter((s: any) => s.entry_type === 'deal' && Number(s.role_id) === Number(selectedRole.id));
+              list = dealsForRole.map((s: any) => ({
+                candidate_id: s.candidate_id,
+                candidate_code: "",
+                candidate_name: s.candidate_name,
+                association_status: "deal",
+                recruiter_name: undefined,
+                recruiter_code: undefined,
+              }));
+            }
+          }
           if (entryType === "deal" && showInterviewsOnly && Array.isArray(list) && list.length === 0) {
             const rs = await fetchWithAuth(`/api/recruiter/role-submissions/${selectedRole.id}?scope=${showAllRecruiters ? "all" : ""}`);
             if (rs.ok) {
@@ -110,11 +129,12 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
           setRoleCandidates(list || []);
           setSelectedCandidateId(null);
           setSelectedAssociationId(null);
+          setSelectedCandidateIndex(null);
         }
       } catch (e) {
         console.error("Failed to fetch role candidates:", e);
       }
-    };
+      };
     fetchCandidates();
   }, [selectedRole, entryType, showInterviewsOnly, showAllRecruiters]);
 
@@ -132,101 +152,104 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
         const selectedItem = roleCandidates.find((rc) =>
           selectedAssociationId ? rc.association_id === selectedAssociationId : rc.candidate_id === selectedCandidateId
         );
-        const needUpdateAssociation = !(selectedItem && selectedItem.association_status === 'deal');
-        if (needUpdateAssociation) {
-          let assocResp: Response | null = null;
-          if (selectedAssociationId) {
-            assocResp = await fetchWithAuth(`/api/recruiter/associations/${selectedAssociationId}/deal`, { method: "POST" });
-            if (!assocResp.ok && selectedCandidateId) {
-              const fallback = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates/${selectedCandidateId}/deal`, { method: "POST" });
-              if (!fallback.ok) {
-                try {
-                  const ct = fallback.headers.get('content-type') || '';
-                  const isJson = ct.includes('application/json');
-                  const data = isJson ? await fallback.json() : await fallback.text();
-                  setError((data as any)?.error || 'Failed to associate deal with candidate');
-                } catch {
-                  setError('Failed to associate deal with candidate');
-                }
-                return;
-              }
-            } else if (!assocResp.ok) {
-              try {
-                const ct = assocResp.headers.get('content-type') || '';
-                const isJson = ct.includes('application/json');
-                const data = isJson ? await assocResp.json() : await assocResp.text();
-                setError((data as any)?.error || 'Failed to associate deal with candidate');
-              } catch {
-                setError('Failed to associate deal with candidate');
-              }
-              return;
-            }
-          } else {
-            assocResp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/candidates/${selectedCandidateId}/deal`, { method: "POST" });
-            if (!assocResp.ok) {
-              try {
-                const ct = assocResp.headers.get('content-type') || '';
-                const isJson = ct.includes('application/json');
-                const data = isJson ? await assocResp.json() : await assocResp.text();
-                setError((data as any)?.error || 'Failed to associate deal with candidate');
-              } catch {
-                setError('Failed to associate deal with candidate');
-              }
-              return;
-            }
-          }
+        if (!selectedItem) {
+          setError("Invalid selection");
+          return;
         }
-        // Submit deal entry
-        const resp = await fetchWithAuth("/api/recruiter/submissions", {
+        const resp = await fetchWithAuth("/api/recruiter/deals", {
           method: "POST",
           body: JSON.stringify({
-            client_id: client.id,
-            team_id: client.team_id,
             role_id: selectedRole.id,
-            entry_type: "deal",
+            candidate_id: selectedItem.candidate_id,
+            association_id: selectedAssociationId || undefined,
             submission_date: entryDate,
             notes: "",
           }),
         });
         if (!resp.ok) {
+          if (resp.status === 404) {
+            const r2 = await fetchWithAuth("/api/recruiter/submissions", {
+              method: "POST",
+              body: JSON.stringify({
+                client_id: client.id,
+                team_id: client.team_id,
+                role_id: selectedRole.id,
+                entry_type: "deal",
+                submission_date: entryDate,
+                notes: "",
+                candidate_id: selectedItem.candidate_id,
+                candidate_name: selectedItem.candidate_name,
+              }),
+            });
+            if (!r2.ok) {
+              try {
+                const ct = r2.headers.get('content-type') || '';
+                const isJson = ct.includes('application/json');
+                const data = isJson ? await r2.json() : await r2.text();
+                setError((data as any)?.error || 'Failed to submit deal');
+              } catch {
+                setError('Failed to submit deal');
+              }
+              return;
+            }
+          } else {
           try {
             const ct = resp.headers.get('content-type') || '';
             const isJson = ct.includes('application/json');
             const data = isJson ? await resp.json() : await resp.text();
-            setError((data as any)?.error || 'Failed to create deal entry');
+            setError((data as any)?.error || 'Failed to submit deal');
           } catch {
-            setError('Failed to create deal entry');
+            setError('Failed to submit deal');
           }
           return;
+          }
         }
-        setSuccess('Deal recorded successfully');
+        setSuccess(`Deal submitted: ${selectedItem.candidate_name} • ${selectedRole.title}`);
+        setToastText("Deal Submitted");
+        setShowToast(true);
         setTimeout(() => {
+          setShowToast(false);
           onSuccess();
           onClose();
-        }, 600);
+        }, 1500);
       } else {
         // Submit dropout entry
-        if (!selectedCandidateId) {
+        if (!selectedAssociationId && !selectedCandidateId && selectedCandidateIndex === null) {
           setError("Please select a candidate for this role");
           return;
         }
-        const candidate = roleCandidates.find(c => c.candidate_id === selectedCandidateId);
+        let candidateItem = roleCandidates.find(c => (selectedAssociationId ? c.association_id === selectedAssociationId : (selectedCandidateId ? c.candidate_id === selectedCandidateId : false)));
+        if (!candidateItem && selectedCandidateIndex !== null) {
+          candidateItem = roleCandidates[selectedCandidateIndex] || undefined;
+        }
         const roleDetails = dealRoles.find(r => r.id === selectedRole.id);
         if (roleDetails) {
-          const resp = await fetchWithAuth("/api/recruiter/submissions", {
-            method: "POST",
-            body: JSON.stringify({
-              entry_type: "dropout",
-              dropout_role_id: selectedRole.id,
-              dropout_reason: dropoutReason,
-              client_id: roleDetails.client_id,
-              team_id: roleDetails.team_id,
-              role_id: roleDetails.id,
-              submission_date: entryDate,
-              notes: "",
-              candidate_name: candidate ? candidate.candidate_name : undefined,
-            }),
-          });
+          let resp: Response | null = null;
+          if (selectedAssociationId) {
+            resp = await fetchWithAuth(`/api/recruiter/associations/${selectedAssociationId}/dropout`, {
+              method: "POST",
+              body: JSON.stringify({
+                submission_date: entryDate,
+                dropout_reason: dropoutReason,
+              }),
+            });
+          }
+          if (!resp || !resp.ok) {
+            resp = await fetchWithAuth("/api/recruiter/submissions", {
+              method: "POST",
+              body: JSON.stringify({
+                entry_type: "dropout",
+                dropout_role_id: selectedRole.id,
+                dropout_reason: dropoutReason,
+                client_id: roleDetails.client_id,
+                team_id: roleDetails.team_id,
+                role_id: roleDetails.id,
+                submission_date: entryDate,
+                notes: "",
+                candidate_name: candidateItem ? candidateItem.candidate_name : undefined,
+              }),
+            });
+          }
           if (!resp.ok) {
             try {
               const ct = resp.headers.get('content-type') || '';
@@ -253,6 +276,42 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
       } else {
         setError('Failed to submit. Please try again.');
       }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleReverseDropout = async () => {
+    if (!selectedRole) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const resp = await fetchWithAuth(`/api/recruiter/roles/${selectedRole.id}/reverse-dropout`, {
+        method: "POST",
+        body: JSON.stringify({
+          submission_date: entryDate,
+        }),
+      });
+      if (!resp.ok) {
+        try {
+          const ct = resp.headers.get('content-type') || '';
+          const isJson = ct.includes('application/json');
+          const data = isJson ? await resp.json() : await resp.text();
+          setError((data as any)?.error || 'Failed to reverse dropout');
+        } catch {
+          setError('Failed to reverse dropout');
+        }
+        return;
+      }
+      setSuccess(`Dropout reversed successfully`);
+      setToastText("Dropout Reversed");
+      setShowToast(true);
+      onSuccess();
+      setTimeout(() => {
+        setShowToast(false);
+      }, 2000);
+    } catch (e) {
+      setError('Failed to reverse dropout');
     } finally {
       setSubmitting(false);
     }
@@ -299,8 +358,15 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                 </div>
               )}
               {success && (
-                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-4 py-3">
-                  {success}
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg px-4 py-3 flex items-center justify-between">
+                  <span>{success}</span>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="ml-4 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-sm font-medium"
+                  >
+                    Close
+                  </button>
                 </div>
               )}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -563,24 +629,63 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                       {selectedRole && (
                         <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
                           <p className="text-sm text-amber-800">
-                            <strong>Note:</strong> This indicates a consultant was offered the role but declined it. Only your Account Manager can modify this role afterward.
+                            <strong>Note:</strong> A consultant declined the offer on this role. You can reverse the dropout or record a new dropout below.
                           </p>
+                          <div className="mt-2 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleReverseDropout}
+                              disabled={submitting || !!success}
+                              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {submitting ? "Processing..." : "Reverse Dropout"}
+                            </button>
+                          </div>
                           <div className="mt-4">
                             <label className="block text-sm font-medium text-slate-700 mb-2">
                               Select Candidate *
                             </label>
                             {roleCandidates.length > 0 ? (
                               <select
-                                value={selectedCandidateId ?? ""}
-                                onChange={(e) => setSelectedCandidateId(e.target.value ? parseInt(e.target.value) : null)}
+                                value={selectedAssociationId ?? selectedCandidateId ?? (selectedCandidateIndex ?? "")}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const val = raw ? parseInt(raw) : null;
+                                  if (val !== null) {
+                                    const byAssoc = roleCandidates.find(rc => rc.association_id === val);
+                                    const byCand = roleCandidates.find(rc => rc.candidate_id === val);
+                                    if (byAssoc) {
+                                      setSelectedAssociationId(val);
+                                      setSelectedCandidateId(byAssoc.candidate_id ?? null);
+                                      setSelectedCandidateIndex(null);
+                                    } else if (byCand) {
+                                      setSelectedAssociationId(null);
+                                      setSelectedCandidateId(val);
+                                      setSelectedCandidateIndex(null);
+                                    } else {
+                                      setSelectedAssociationId(null);
+                                      setSelectedCandidateId(null);
+                                      setSelectedCandidateIndex(val);
+                                    }
+                                  } else {
+                                    setSelectedAssociationId(null);
+                                    setSelectedCandidateId(null);
+                                    setSelectedCandidateIndex(null);
+                                  }
+                                }}
                                 className="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-500 focus:border-transparent"
                               >
                                 <option value="" disabled>Select a candidate</option>
-                                {roleCandidates.map((c) => (
-                                  <option key={c.candidate_id} value={c.candidate_id}>
-                                    {c.candidate_name} ({c.candidate_code}) • {c.association_status}
-                                  </option>
-                                ))}
+                                {roleCandidates.map((c) => {
+                                  const idx = roleCandidates.indexOf(c);
+                                  const key = c.association_id ?? c.candidate_id ?? idx;
+                                  const value = c.association_id ?? c.candidate_id ?? idx;
+                                  return (
+                                    <option key={key} value={value}>
+                                      {c.candidate_name}{c.candidate_code ? ` (${c.candidate_code})` : ""} • {c.association_status}
+                                    </option>
+                                  );
+                                })}
                               </select>
                             ) : (
                               <div className="text-sm text-slate-500">
@@ -632,10 +737,29 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
                 >
                   Cancel
                 </button>
+                {entryType === "dropout" && selectedRole && (
+                  <button
+                    type="button"
+                    onClick={handleReverseDropout}
+                    disabled={submitting || !!success || !selectedRole}
+                    className="flex-1 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                  >
+                    {submitting ? "Processing..." : "Reverse Dropout"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleSubmit}
-                  disabled={submitting || !!success || !selectedRole || ((entryType === "deal") ? (!selectedCandidateId && !selectedAssociationId) : (!selectedCandidateId || !dropoutReason.trim()))}
+                  disabled={
+                    submitting ||
+                    !!success ||
+                    !selectedRole ||
+                    (
+                      entryType === "deal"
+                        ? (!selectedCandidateId && !selectedAssociationId)
+                        : ((!selectedAssociationId && !selectedCandidateId && selectedCandidateIndex === null) || !dropoutReason.trim())
+                    )
+                  }
                   className={`flex-1 px-6 py-3 ${
                     entryType === "deal"
                       ? "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
@@ -649,6 +773,15 @@ export default function QuickEntryModal({ client, onClose, onSuccess }: QuickEnt
           )}
         </div>
       </div>
+
+      {showToast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[1000]">
+          <div className="px-4 py-2 bg-emerald-600 text-white rounded-lg shadow-lg flex items-center gap-2">
+            <CheckCircle className="w-5 h-5" />
+            <span>{toastText || "Deal Submitted"}</span>
+          </div>
+        </div>
+      )}
 
       {/* Dropout Role Selection Modal */}
       {showDropoutModal && (

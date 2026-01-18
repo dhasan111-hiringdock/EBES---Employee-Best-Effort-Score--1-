@@ -78,6 +78,424 @@ app.get("/api/recruiter/clients", recruiterOnly, async (c) => {
   }
 });
 
+app.post("/api/recruiter/roles/:roleId/reverse-dropout", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  const roleId = c.req.param("roleId");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const submission_date = (body && typeof body.submission_date === "string" && body.submission_date) ? body.submission_date : new Date().toISOString().split("T")[0];
+  try {
+    const role = await db.prepare("SELECT * FROM am_roles WHERE id = ?").bind(roleId).first();
+    if (!role) {
+      return c.json({ error: "Role not found" }, 404);
+    }
+    const clientId = (role as any).client_id;
+    const teamId = (role as any).team_id;
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const hasCandidateId = (tableInfo.results || []).some((r: any) => (r as any).name === "candidate_id");
+    let candidateRow = await db
+      .prepare(`
+        ${hasCandidateId ? "SELECT candidate_id, candidate_name" : "SELECT candidate_name"}
+        FROM recruiter_submissions
+        WHERE role_id = ? AND recruiter_user_id = ? AND entry_type = 'dropout'
+        ORDER BY submission_date DESC, created_at DESC
+        LIMIT 1
+      `)
+      .bind(roleId, (recruiterUser as any).id)
+      .first();
+    if (!candidateRow) {
+      candidateRow = await db
+        .prepare(`
+          ${hasCandidateId ? "SELECT candidate_id, candidate_name, recruiter_user_id" : "SELECT candidate_name, recruiter_user_id"}
+          FROM recruiter_submissions
+          WHERE role_id = ? AND entry_type = 'dropout'
+          ORDER BY submission_date DESC, created_at DESC
+          LIMIT 1
+        `)
+        .bind(roleId)
+        .first();
+      if (!candidateRow) {
+        return c.json({ error: "No dropout found for this role" }, 404);
+      }
+    }
+    const candidateId = hasCandidateId ? ((candidateRow as any).candidate_id || null) : null;
+    const candidateName = (candidateRow as any).candidate_name || null;
+    if (!candidateId && (!candidateName || String(candidateName).trim().length === 0)) {
+      return c.json({ error: "Unable to determine candidate for reversal" }, 400);
+    }
+    let finalCandidateId = candidateId;
+    if (!finalCandidateId && candidateName) {
+      const cand = await db
+        .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))")
+        .bind(String(candidateName).trim())
+        .first();
+      finalCandidateId = cand ? (cand as any).id : null;
+    }
+    if (!finalCandidateId && candidateName) {
+      const counterRow = await db
+        .prepare("SELECT next_number FROM code_counters WHERE category = 'candidate'")
+        .first();
+      let nextNumber = 1;
+      if (counterRow) {
+        nextNumber = (counterRow as any).next_number;
+        await db
+          .prepare("UPDATE code_counters SET next_number = next_number + 1 WHERE category = 'candidate'")
+          .run();
+      } else {
+        await db
+          .prepare("INSERT INTO code_counters (category, next_number) VALUES ('candidate', 2)")
+          .run();
+      }
+      const candidateCode = `NL-${String(nextNumber).padStart(4, '0')}`;
+      const insertRes = await db
+        .prepare(`
+          INSERT INTO candidates (candidate_code, name, email, phone, is_active, created_by_user_id, created_at, updated_at)
+          VALUES (?, ?, NULL, NULL, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind(candidateCode, String(candidateName).trim(), (recruiterUser as any).id)
+        .run();
+      finalCandidateId = insertRes.meta.last_row_id;
+    }
+    if (!finalCandidateId) {
+      return c.json({ error: "Candidate record not found" }, 404);
+    }
+    const existingAssoc = await db
+      .prepare(`
+        SELECT id
+        FROM candidate_role_associations
+        WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0
+        LIMIT 1
+      `)
+      .bind(roleId, finalCandidateId)
+      .first();
+    if (existingAssoc) {
+      await db
+        .prepare(`
+          UPDATE candidate_role_associations
+          SET status = 'deal', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `)
+        .bind((existingAssoc as any).id)
+        .run();
+    } else {
+      await db
+        .prepare(`
+          INSERT INTO candidate_role_associations (
+            candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'deal', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind(finalCandidateId, roleId, (recruiterUser as any).id, clientId, teamId, submission_date)
+        .run();
+    }
+    const cols = (tableInfo.results || []).map((r: any) => (r as any).name);
+    const valueMap: Record<string, any> = {
+      recruiter_user_id: (recruiterUser as any).id,
+      client_id: clientId,
+      team_id: teamId,
+      role_id: Number(roleId),
+      account_manager_id: (role as any).account_manager_id || null,
+      recruitment_manager_id: null,
+      submission_type: '24h',
+      submission_date,
+      candidate_name: candidateName,
+      candidate_id: finalCandidateId,
+      notes: 'Reversed dropout → deal by recruiter',
+      entry_type: 'deal',
+      interview_level: null,
+      dropout_role_id: null,
+      dropout_reason: null,
+      cv_match_percent: null
+    };
+    const insertCols = [
+      'recruiter_user_id',
+      'client_id',
+      'team_id',
+      'role_id',
+      'account_manager_id',
+      'recruitment_manager_id',
+      'submission_type',
+      'submission_date',
+      'candidate_name',
+      'candidate_id',
+      'notes',
+      'entry_type',
+      'interview_level',
+      'dropout_role_id',
+      'dropout_reason',
+      'cv_match_percent'
+    ].filter((cname) => cols.includes(cname));
+    const placeholders = insertCols.map(() => '?').join(', ');
+    await db
+      .prepare(`INSERT INTO recruiter_submissions (${insertCols.join(', ')}) VALUES (${placeholders})`)
+      .bind(...insertCols.map((cname) => valueMap[cname]))
+      .run();
+    await db
+      .prepare(`
+        ${hasCandidateId
+          ? `
+        DELETE FROM recruiter_submissions
+        WHERE role_id = ?
+          AND entry_type = 'dropout'
+          AND (
+            candidate_id = ?
+            OR (candidate_id IS NULL AND LOWER(TRIM(candidate_name)) = LOWER(TRIM(?)))
+          )
+        `
+          : `
+        DELETE FROM recruiter_submissions
+        WHERE role_id = ?
+          AND entry_type = 'dropout'
+          AND LOWER(TRIM(candidate_name)) = LOWER(TRIM(?))
+        `}
+      `)
+      .bind(...(hasCandidateId ? [roleId, finalCandidateId, candidateName || ''] : [roleId, candidateName || '']))
+      .run();
+    const latestDropout = await db
+      .prepare(`
+        SELECT id
+        FROM recruiter_submissions
+        WHERE role_id = ?
+          AND entry_type = 'dropout'
+        ORDER BY submission_date DESC, created_at DESC
+        LIMIT 1
+      `)
+      .bind(roleId)
+      .first();
+    if (latestDropout) {
+      await db.prepare("DELETE FROM recruiter_submissions WHERE id = ?").bind((latestDropout as any).id).run();
+    }
+    await db
+      .prepare("UPDATE am_roles SET status = 'deal', updated_at = datetime('now') WHERE id = ?")
+      .bind(roleId)
+      .run();
+    const lastReq = await db
+      .prepare(`
+        SELECT id, rm_user_id, am_user_id
+        FROM dropout_requests
+        WHERE role_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `)
+      .bind(roleId)
+      .first();
+    if (lastReq) {
+      await db
+        .prepare(`
+          UPDATE dropout_requests
+          SET am_decision = 'ignore',
+              am_new_role_status = 'deal',
+              final_status = 'completed',
+              updated_at = datetime('now')
+          WHERE id = ?
+        `)
+        .bind((lastReq as any).id)
+        .run();
+      if ((lastReq as any).am_user_id) {
+        await createNotification(db, {
+          userId: (lastReq as any).am_user_id,
+          type: 'system',
+          title: 'Dropout Reversed',
+          message: `Recruiter reversed a dropout to deal for role ${(role as any).title}.`,
+          relatedEntityType: 'role',
+          relatedEntityId: Number(roleId)
+        });
+      }
+      if ((lastReq as any).rm_user_id) {
+        await createNotification(db, {
+          userId: (lastReq as any).rm_user_id,
+          type: 'system',
+          title: 'Dropout Reversed',
+          message: `Recruiter reversed a dropout to deal for role ${(role as any).title}.`,
+          relatedEntityType: 'role',
+          relatedEntityId: Number(roleId)
+        });
+      }
+    }
+    await createNotification(db, {
+      userId: (recruiterUser as any).id,
+      type: 'deal',
+      title: 'Dropout Reversed to Deal',
+      message: `Dropout reversed to deal for role ${(role as any).title}.`,
+      relatedEntityType: 'role',
+      relatedEntityId: Number(roleId)
+    });
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error reversing dropout:", error);
+    return c.json({ error: "Failed to reverse dropout" }, 500);
+  }
+});
+
+app.post("/api/recruiter/deals", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const schema = z.object({
+    role_id: z.number(),
+    candidate_id: z.number().optional(),
+    association_id: z.number().optional(),
+    submission_date: z.string(),
+    notes: z.string().optional(),
+  });
+  try {
+    const data = schema.parse(body);
+    let roleId = data.role_id;
+    let candidateId = data.candidate_id || null;
+    if (data.association_id && !candidateId) {
+      const assoc = await db
+        .prepare(`
+          SELECT candidate_id, role_id
+          FROM candidate_role_associations
+          WHERE id = ? AND is_discarded = 0
+        `)
+        .bind(data.association_id)
+        .first();
+      if (!assoc) {
+        return c.json({ error: "Association not found" }, 404);
+      }
+      candidateId = (assoc as any).candidate_id;
+      roleId = (assoc as any).role_id;
+    }
+    const role = await db
+      .prepare("SELECT * FROM am_roles WHERE id = ?")
+      .bind(roleId)
+      .first();
+    if (!role) {
+      return c.json({ error: "Role not found" }, 404);
+    }
+    const clientId = (role as any).client_id || null;
+    const teamId = (role as any).team_id || null;
+    const accountManagerId = (role as any).account_manager_id || null;
+    if (!candidateId) {
+      return c.json({ error: "Candidate required" }, 400);
+    }
+    const candRow = await db
+      .prepare("SELECT name FROM candidates WHERE id = ?")
+      .bind(candidateId)
+      .first();
+    const candidateName = candRow ? (candRow as any).name : null;
+    if (!candidateName) {
+      return c.json({ error: "Candidate not found" }, 404);
+    }
+    const assocRow = await db
+      .prepare(`
+        SELECT id
+        FROM candidate_role_associations
+        WHERE role_id = ? AND candidate_id = ? AND recruiter_user_id = ? AND is_discarded = 0
+      `)
+      .bind(roleId, candidateId, (recruiterUser as any).id)
+      .first();
+    if (!assocRow) {
+      await db
+        .prepare(`
+          INSERT INTO candidate_role_associations (
+            candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'deal', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `)
+        .bind(candidateId, roleId, (recruiterUser as any).id, clientId, teamId, data.submission_date)
+        .run();
+    } else {
+      await db
+        .prepare(`
+          UPDATE candidate_role_associations
+          SET status = 'deal', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `)
+        .bind((assocRow as any).id)
+        .run();
+    }
+    await db
+      .prepare("UPDATE am_roles SET status = 'deal' WHERE id = ?")
+      .bind(roleId)
+      .run();
+    if (accountManagerId) {
+      await createNotification(db, {
+        userId: accountManagerId,
+        type: 'deal',
+        title: 'New Deal!',
+        message: `Recruiter ${(recruiterUser as any).name} closed a deal on role ${(role as any).title}`,
+        relatedEntityType: 'role',
+        relatedEntityId: Number(roleId)
+      });
+    }
+    if (teamId) {
+      const rmUsers = await db
+        .prepare(`
+          SELECT u.id
+          FROM users u
+          INNER JOIN team_assignments ta ON u.id = ta.user_id
+          WHERE ta.team_id = ? AND u.role = 'recruitment_manager'
+        `)
+        .bind(teamId)
+        .all();
+      for (const row of rmUsers.results || []) {
+        const rmId = (row as any).id;
+        await createNotification(db, {
+          userId: rmId,
+          type: 'deal',
+          title: 'New Deal!',
+          message: `Recruiter ${(recruiterUser as any).name} closed a deal on role ${(role as any).title}`,
+          relatedEntityType: 'role',
+          relatedEntityId: Number(roleId)
+        });
+      }
+    }
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const cols = (tableInfo.results || []).map((r: any) => (r as any).name);
+    const valueMap: Record<string, any> = {
+      recruiter_user_id: (recruiterUser as any).id,
+      client_id: clientId || null,
+      team_id: teamId || null,
+      role_id: roleId || null,
+      account_manager_id: accountManagerId,
+      recruitment_manager_id: null,
+      submission_type: '24h',
+      submission_date: data.submission_date,
+      candidate_name: candidateName,
+      candidate_id: candidateId,
+      notes: data.notes || "",
+      entry_type: 'deal',
+      interview_level: null,
+      dropout_role_id: null,
+      dropout_reason: null,
+      cv_match_percent: null
+    };
+    const insertCols = [
+      'recruiter_user_id',
+      'client_id',
+      'team_id',
+      'role_id',
+      'account_manager_id',
+      'recruitment_manager_id',
+      'submission_type',
+      'submission_date',
+      'candidate_name',
+      'candidate_id',
+      'notes',
+      'entry_type',
+      'interview_level',
+      'dropout_role_id',
+      'dropout_reason',
+      'cv_match_percent'
+    ].filter((c) => cols.includes(c));
+    const placeholders = insertCols.map(() => '?').join(', ');
+    await db
+      .prepare(`INSERT INTO recruiter_submissions (${insertCols.join(', ')}) VALUES (${placeholders})`)
+      .bind(...insertCols.map((c) => valueMap[c]))
+      .run();
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error submitting deal:", error);
+    return c.json({ error: "Failed to submit deal" }, 500);
+  }
+});
+
 app.post("/api/recruiter/seed/sample-data", recruiterOnly, async (c) => {
   const db = c.env.DB;
   const recruiterUser = c.get("recruiterUser");
@@ -511,25 +929,55 @@ app.get("/api/recruiter/deal-roles", recruiterOnly, async (c) => {
   }
 });
 
-// Get candidates associated with a role for the current recruiter
+// Get candidates associated with a role
 app.get("/api/recruiter/roles/:roleId/candidates", recruiterOnly, async (c) => {
   const db = c.env.DB;
   const recruiterUser = c.get("recruiterUser");
   const roleId = c.req.param("roleId");
   const interviewedOnly = c.req.query("interviewed_only") === "1";
+  const scopeAll = c.req.query("scope") === "all";
+  const onlyDeal = c.req.query("only_deal") === "1" || c.req.query("status") === "deal";
 
   try {
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const hasCandidateId = (tableInfo.results || []).some((r: any) => (r as any).name === "candidate_id");
+    const candidateMatch = hasCandidateId
+      ? "rs.candidate_id = c.id OR LOWER(TRIM(rs.candidate_name)) = LOWER(TRIM(c.name))"
+      : "LOWER(TRIM(rs.candidate_name)) = LOWER(TRIM(c.name))";
     let query = `
       SELECT 
+        cra.id as association_id,
         c.id as candidate_id,
         c.candidate_code,
-        c.name as candidate_name,
-        cra.status as association_status
+        COALESCE(
+          c.name,
+          (
+            SELECT rs2.candidate_name 
+            FROM recruiter_submissions rs2 
+            WHERE rs2.role_id = cra.role_id 
+              AND rs2.recruiter_user_id = cra.recruiter_user_id 
+              AND rs2.entry_type IN ('submission','deal')
+            ORDER BY rs2.submission_date DESC 
+            LIMIT 1
+          )
+        ) as candidate_name,
+        cra.status as association_status,
+        u.name as recruiter_name,
+        u.user_code as recruiter_code
       FROM candidate_role_associations cra
-      INNER JOIN candidates c ON c.id = cra.candidate_id
-      WHERE cra.role_id = ? AND cra.recruiter_user_id = ? AND cra.is_discarded = 0
+      LEFT JOIN candidates c ON c.id = cra.candidate_id
+      LEFT JOIN users u ON u.id = cra.recruiter_user_id
+      WHERE cra.role_id = ? AND cra.is_discarded = 0
     `;
-    const params: any[] = [roleId, (recruiterUser as any).id];
+    const params: any[] = [roleId];
+    if (!scopeAll) {
+      query += ` AND cra.recruiter_user_id = ?`;
+      params.push((recruiterUser as any).id);
+    }
+
+    if (onlyDeal) {
+      query += ` AND cra.status = 'deal'`;
+    }
 
     if (interviewedOnly) {
       query += `
@@ -538,13 +986,13 @@ app.get("/api/recruiter/roles/:roleId/candidates", recruiterOnly, async (c) => {
           FROM recruiter_submissions rs
           WHERE rs.role_id = cra.role_id
             AND rs.recruiter_user_id = cra.recruiter_user_id
-            AND rs.entry_type = 'interview'
-            AND rs.candidate_name = c.name
+            AND rs.entry_type IN ('interview','submission')
+            AND (${candidateMatch})
         )
       `;
     }
 
-    query += ` ORDER BY c.name ASC`;
+    query += ` ORDER BY candidate_name ASC`;
 
     const { results } = await db.prepare(query).bind(...params).all();
 
@@ -558,14 +1006,19 @@ app.get("/api/recruiter/roles/:roleId/candidates", recruiterOnly, async (c) => {
 // Role submissions for current recruiter
 app.get("/api/recruiter/role-submissions/:roleId", recruiterOnly, async (c) => {
   const db = c.env.DB;
-  const recruiterUser = c.get("recruiterUser");
   const roleId = c.req.param("roleId");
   try {
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const hasCandidateId = (tableInfo.results || []).some((r: any) => (r as any).name === "candidate_id");
+    const candidateMatch = hasCandidateId
+      ? "rs2.candidate_id = c.id OR LOWER(TRIM(rs2.candidate_name)) = LOWER(TRIM(c.name))"
+      : "LOWER(TRIM(rs2.candidate_name)) = LOWER(TRIM(c.name))";
     const rows = await db.prepare(`
       SELECT 
         cra.id as association_id,
         cra.candidate_id,
         c.name as candidate_name,
+        c.candidate_code as candidate_code,
         c.email as candidate_email,
         c.phone as candidate_phone,
         cra.status as association_status,
@@ -587,9 +1040,9 @@ app.get("/api/recruiter/role-submissions/:roleId", recruiterOnly, async (c) => {
           SELECT 1 
           FROM recruiter_submissions rs2
           WHERE rs2.role_id = cra.role_id
-            AND rs2.recruiter_user_id = cra.recruiter_user_id
             AND rs2.entry_type = 'interview'
-            AND rs2.candidate_name = c.name
+            AND rs2.recruiter_user_id = cra.recruiter_user_id
+            AND (${candidateMatch})
         ) as has_interview
       FROM candidate_role_associations cra
       LEFT JOIN candidates c ON cra.candidate_id = c.id
@@ -599,19 +1052,245 @@ app.get("/api/recruiter/role-submissions/:roleId", recruiterOnly, async (c) => {
        AND rs.recruiter_user_id = cra.recruiter_user_id 
        AND rs.entry_type = 'submission'
        AND DATE(rs.submission_date) = DATE(cra.submission_date)
-      WHERE cra.role_id = ? AND cra.recruiter_user_id = ?
+      WHERE cra.role_id = ?
       ORDER BY cra.submission_date DESC, cra.id DESC
-    `).bind(roleId, (recruiterUser as any).id).all();
+    `).bind(roleId).all();
 
     const results = rows.results || [];
     const isPending = (s: string) => s === 'rm_evaluation';
+    const totalSubmissionsRow = await db
+      .prepare(`
+        SELECT COUNT(*) as total
+        FROM recruiter_submissions
+        WHERE role_id = ? AND entry_type = 'submission'
+      `)
+      .bind(roleId)
+      .first();
     return c.json({
       under_consideration: results.filter((r: any) => (r as any).is_discarded !== 1 && !isPending((r as any).association_status) && (r as any).association_status !== 'client_rejected'),
       rejected: results.filter((r: any) => (r as any).is_discarded === 1 || (r as any).association_status === 'client_rejected'),
+      total_submissions: Number((totalSubmissionsRow as any)?.total || 0),
     });
   } catch (error: any) {
     console.error("Error fetching recruiter role submissions:", error);
     return c.json({ error: error.message }, 500);
+  }
+});
+
+// Mark deal for a specific association (any recruiter)
+app.post("/api/recruiter/associations/:associationId/deal", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const associationId = c.req.param("associationId");
+  try {
+    const assoc = await db
+      .prepare(`
+        SELECT id, role_id, candidate_id, recruiter_user_id 
+        FROM candidate_role_associations
+        WHERE id = ? AND is_discarded = 0
+      `)
+      .bind(associationId)
+      .first();
+    if (!assoc) {
+      return c.json({ error: "Association not found" }, 404);
+    }
+    const roleId = (assoc as any).role_id;
+    const candidateId = (assoc as any).candidate_id;
+    const recruiterId = (assoc as any).recruiter_user_id;
+
+    const candidateRow = await db
+      .prepare(`SELECT name FROM candidates WHERE id = ?`)
+      .bind(candidateId)
+      .first();
+    const candidateName = candidateRow ? (candidateRow as any).name : null;
+    if (!candidateName) {
+      return c.json({ error: "Candidate not found" }, 404);
+    }
+
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const hasCandidateId = (tableInfo.results || []).some((r: any) => (r as any).name === "candidate_id");
+    const hasEligibilitySubmissions = hasCandidateId
+      ? await db
+          .prepare(`
+            SELECT 1
+            FROM recruiter_submissions
+            WHERE role_id = ? 
+              AND recruiter_user_id = ? 
+              AND entry_type IN ('interview','submission') 
+              AND (candidate_id = ? OR LOWER(TRIM(candidate_name)) = LOWER(TRIM(?)))
+            LIMIT 1
+          `)
+          .bind(roleId, recruiterId, candidateId, candidateName)
+          .first()
+      : await db
+          .prepare(`
+            SELECT 1
+            FROM recruiter_submissions
+            WHERE role_id = ? 
+              AND recruiter_user_id = ? 
+              AND entry_type IN ('interview','submission') 
+              AND LOWER(TRIM(candidate_name)) = LOWER(TRIM(?))
+            LIMIT 1
+          `)
+          .bind(roleId, recruiterId, candidateName)
+          .first();
+    const hasEligibilityCra = await db
+      .prepare(`
+        SELECT 1
+        FROM candidate_role_associations
+        WHERE id = ?
+          AND is_discarded = 0
+          AND status IN ('submitted','rm_evaluation','client_submitted')
+        LIMIT 1
+      `)
+      .bind(associationId)
+      .first();
+    if (!hasEligibilitySubmissions && !hasEligibilityCra) {
+      return c.json({ error: "Interview required before marking deal" }, 400);
+    }
+
+    await db
+      .prepare(`
+        UPDATE candidate_role_associations
+        SET status = 'deal',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `)
+      .bind(associationId)
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error marking candidate deal:", error);
+    return c.json({ error: "Failed to mark candidate deal" }, 500);
+  }
+});
+
+// Record dropout for a specific association (candidate rejected offer)
+app.post("/api/recruiter/associations/:associationId/dropout", recruiterOnly, async (c) => {
+  const db = c.env.DB;
+  const recruiterUser = c.get("recruiterUser");
+  const associationId = c.req.param("associationId");
+  let body: any = {};
+  try {
+    body = await c.req.json();
+  } catch {}
+  const schema = z.object({
+    submission_date: z.string(),
+    dropout_reason: z.string(),
+  });
+  try {
+    const data = schema.parse(body);
+    const assoc = await db
+      .prepare(`
+        SELECT id, role_id, candidate_id, client_id, team_id
+        FROM candidate_role_associations
+        WHERE id = ? AND is_discarded = 0
+      `)
+      .bind(associationId)
+      .first();
+    if (!assoc) {
+      return c.json({ error: "Association not found" }, 404);
+    }
+    const roleId = (assoc as any).role_id;
+    const candidateId = (assoc as any).candidate_id;
+    const clientId = (assoc as any).client_id;
+    const teamId = (assoc as any).team_id;
+
+    const role = await db.prepare("SELECT * FROM am_roles WHERE id = ?").bind(roleId).first();
+    if (!role) {
+      return c.json({ error: "Role not found" }, 404);
+    }
+    const accountManagerId = (role as any).account_manager_id || null;
+
+    const candidateRow = await db.prepare("SELECT name FROM candidates WHERE id = ?").bind(candidateId).first();
+    const candidateName = candidateRow ? (candidateRow as any).name : null;
+
+    // Create dropout request routed to RM (ack) and AM (decision)
+    let rmUserId = null;
+    if (teamId) {
+      const rm = await db
+        .prepare(`
+          SELECT u.id
+          FROM users u
+          INNER JOIN team_assignments ta ON u.id = ta.user_id
+          WHERE ta.team_id = ? AND u.role = 'recruitment_manager'
+          LIMIT 1
+        `)
+        .bind(teamId)
+        .first();
+      rmUserId = rm ? (rm as any).id : null;
+    }
+
+    await db
+      .prepare(`
+        INSERT INTO dropout_requests (
+          role_id, recruiter_user_id, rm_user_id, am_user_id, 
+          dropout_reason, rm_status, final_status
+        ) VALUES (?, ?, ?, ?, ?, 'pending', 'pending')
+      `)
+      .bind(roleId, (recruiterUser as any).id, rmUserId, accountManagerId, data.dropout_reason)
+      .run();
+
+    if (rmUserId) {
+      await createNotification(db, {
+        userId: rmUserId,
+        type: 'dropout',
+        title: 'Dropout Requires Acknowledgment',
+        message: `Recruiter ${(recruiterUser as any).name} marked a dropout on role ${(role as any).title}.`,
+        relatedEntityType: 'role',
+        relatedEntityId: Number(roleId)
+      });
+    }
+
+    // Insert recruiter_submissions entry for audit
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const cols = (tableInfo.results || []).map((r: any) => (r as any).name);
+    const valueMap: Record<string, any> = {
+      recruiter_user_id: (recruiterUser as any).id,
+      client_id: clientId || (role as any).client_id || null,
+      team_id: teamId || (role as any).team_id || null,
+      role_id: roleId,
+      account_manager_id: accountManagerId,
+      recruitment_manager_id: rmUserId,
+      submission_type: '24h',
+      submission_date: data.submission_date,
+      candidate_name: candidateName,
+      candidate_id: candidateId,
+      notes: data.dropout_reason,
+      entry_type: 'dropout',
+      interview_level: null,
+      dropout_role_id: roleId,
+      dropout_reason: data.dropout_reason,
+      cv_match_percent: null
+    };
+    const insertCols = [
+      'recruiter_user_id',
+      'client_id',
+      'team_id',
+      'role_id',
+      'account_manager_id',
+      'recruitment_manager_id',
+      'submission_type',
+      'submission_date',
+      'candidate_name',
+      'candidate_id',
+      'notes',
+      'entry_type',
+      'interview_level',
+      'dropout_role_id',
+      'dropout_reason',
+      'cv_match_percent'
+    ].filter((c) => cols.includes(c));
+    const placeholders = insertCols.map(() => '?').join(', ');
+    await db
+      .prepare(`INSERT INTO recruiter_submissions (${insertCols.join(', ')}) VALUES (${placeholders})`)
+      .bind(...insertCols.map((c) => valueMap[c]))
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Error recording dropout:", error);
+    return c.json({ error: "Failed to record dropout" }, 500);
   }
 });
 
@@ -643,16 +1322,47 @@ app.post("/api/recruiter/roles/:roleId/candidates/:candidateId/deal", recruiterO
       return c.json({ error: "Candidate not found" }, 404);
     }
 
-    const hasInterview = await db
+    const tableInfo = await db.prepare("PRAGMA table_info(recruiter_submissions)").all();
+    const hasCandidateId = (tableInfo.results || []).some((r: any) => (r as any).name === "candidate_id");
+    const hasEligibilitySubmissions = hasCandidateId
+      ? await db
+          .prepare(`
+            SELECT 1
+            FROM recruiter_submissions
+            WHERE role_id = ? 
+              AND recruiter_user_id = ? 
+              AND entry_type IN ('interview','submission') 
+              AND (candidate_id = ? OR LOWER(TRIM(candidate_name)) = LOWER(TRIM(?)))
+            LIMIT 1
+          `)
+          .bind(roleId, (recruiterUser as any).id, candidateId, candidateName)
+          .first()
+      : await db
+          .prepare(`
+            SELECT 1
+            FROM recruiter_submissions
+            WHERE role_id = ? 
+              AND recruiter_user_id = ? 
+              AND entry_type IN ('interview','submission') 
+              AND LOWER(TRIM(candidate_name)) = LOWER(TRIM(?))
+            LIMIT 1
+          `)
+          .bind(roleId, (recruiterUser as any).id, candidateName)
+          .first();
+    const hasEligibilityCra = await db
       .prepare(`
         SELECT 1
-        FROM recruiter_submissions
-        WHERE role_id = ? AND recruiter_user_id = ? AND entry_type = 'interview' AND candidate_name = ?
+        FROM candidate_role_associations
+        WHERE role_id = ?
+          AND candidate_id = ?
+          AND recruiter_user_id = ?
+          AND is_discarded = 0
+          AND status IN ('submitted','rm_evaluation','client_submitted')
         LIMIT 1
       `)
-      .bind(roleId, (recruiterUser as any).id, candidateName)
+      .bind(roleId, candidateId, (recruiterUser as any).id)
       .first();
-    if (!hasInterview) {
+    if (!hasEligibilitySubmissions && !hasEligibilityCra) {
       return c.json({ error: "Interview required before marking deal" }, 400);
     }
 
@@ -832,6 +1542,66 @@ app.post("/api/recruiter/submissions", recruiterOnly, async (c) => {
             });
           }
         }
+
+        // Ensure candidate-role association exists and is marked as deal
+        let dealCandidateId = data.candidate_id || null;
+        if (!dealCandidateId && data.candidate_name && data.candidate_name.trim()) {
+          const cand = await db
+            .prepare("SELECT id FROM candidates WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))")
+            .bind(data.candidate_name.trim())
+            .first();
+          dealCandidateId = cand ? (cand as any).id : null;
+        }
+        if (dealCandidateId) {
+          const currentAssoc = await db
+            .prepare(`
+              SELECT id 
+              FROM candidate_role_associations
+              WHERE role_id = ? AND candidate_id = ? AND recruiter_user_id = ? AND is_discarded = 0
+              LIMIT 1
+            `)
+            .bind(roleId, dealCandidateId, (recruiterUser as any).id)
+            .first();
+          if (currentAssoc) {
+            await db
+              .prepare(`
+                UPDATE candidate_role_associations
+                SET status = 'deal', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+              `)
+              .bind((currentAssoc as any).id)
+              .run();
+          } else {
+            const anyAssoc = await db
+              .prepare(`
+                SELECT id 
+                FROM candidate_role_associations
+                WHERE role_id = ? AND candidate_id = ? AND is_discarded = 0
+                LIMIT 1
+              `)
+              .bind(roleId, dealCandidateId)
+              .first();
+            if (anyAssoc) {
+              await db
+                .prepare(`
+                  UPDATE candidate_role_associations
+                  SET status = 'deal', updated_at = CURRENT_TIMESTAMP
+                  WHERE id = ?
+                `)
+                .bind((anyAssoc as any).id)
+                .run();
+            } else {
+              await db
+                .prepare(`
+                  INSERT INTO candidate_role_associations (
+                    candidate_id, role_id, recruiter_user_id, client_id, team_id, status, submission_date, is_discarded, created_at, updated_at
+                  ) VALUES (?, ?, ?, ?, ?, 'deal', ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                `)
+                .bind(dealCandidateId, roleId, (recruiterUser as any).id, clientId, teamId, data.submission_date)
+                .run();
+            }
+          }
+        }
       }
     }
 
@@ -958,6 +1728,7 @@ app.post("/api/recruiter/submissions", recruiterOnly, async (c) => {
       submission_type: submissionTypeValue,
       submission_date: data.submission_date,
       candidate_name: data.candidate_name || null,
+      candidate_id: candidateId || null,
       notes: data.notes || "",
       entry_type: entryType,
       interview_level: data.interview_level || null,
@@ -975,6 +1746,7 @@ app.post("/api/recruiter/submissions", recruiterOnly, async (c) => {
       'submission_type',
       'submission_date',
       'candidate_name',
+      'candidate_id',
       'notes',
       'entry_type',
       'interview_level',

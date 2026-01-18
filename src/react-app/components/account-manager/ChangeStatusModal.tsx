@@ -26,6 +26,7 @@ const statuses = [
 
 export default function ChangeStatusModal({ role, onClose, onStatusChanged }: ChangeStatusModalProps) {
   const [selectedStatus, setSelectedStatus] = useState(role.status);
+  const [closingReason, setClosingReason] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +44,10 @@ export default function ChangeStatusModal({ role, onClose, onStatusChanged }: Ch
     try {
       const response = await fetchWithAuth(`/api/am/roles/${role.id}`, {
         method: "PUT",
-        body: JSON.stringify({ status: selectedStatus }),
+        body: JSON.stringify({ 
+          status: selectedStatus,
+          closing_reason: ['lost','on_hold','cancelled','no_answer'].includes(selectedStatus) ? (closingReason || null) : null
+        }),
       });
 
       if (response.ok) {
@@ -68,6 +72,25 @@ export default function ChangeStatusModal({ role, onClose, onStatusChanged }: Ch
             <p className="text-sm text-gray-600 mt-1">{role.title}</p>
             <p className="text-xs text-gray-500 font-mono mt-0.5">{role.role_code}</p>
           </div>
+
+          {['lost','on_hold','cancelled','no_answer'].includes(selectedStatus) && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+              <textarea
+                value={closingReason}
+                onChange={(e) => setClosingReason(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                rows={3}
+                placeholder={
+                  selectedStatus === 'on_hold' ? 'e.g., Awaiting budget approval, client paused hiring' :
+                  selectedStatus === 'cancelled' ? 'e.g., Client cancelled project, position eliminated' :
+                  selectedStatus === 'no_answer' ? 'e.g., Multiple follow-ups with no response' :
+                  'e.g., Requirements changed, not proceeding'
+                }
+              />
+              <p className="text-xs text-gray-500 mt-1">Optional, helps explain the closing status.</p>
+            </div>
+          )}
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
