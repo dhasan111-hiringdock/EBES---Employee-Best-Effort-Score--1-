@@ -51,6 +51,12 @@ export default function RMSubmissions() {
     try {
       const k = keyOf(i);
       const f = forms[k] || {};
+      const scoreRaw = f.rm_score_0_5 != null ? Number(f.rm_score_0_5) : null;
+      if (scoreRaw != null && (isNaN(scoreRaw) || scoreRaw < 0 || scoreRaw > 5)) {
+        alert("Score must be between 0 and 5");
+        return;
+      }
+      const boundedScore = scoreRaw != null ? Math.max(0, Math.min(5, scoreRaw)) : null;
       const payload: any = {
         rm_validation_status: f.rm_validation_status || "valid",
         rm_work_type: f.rm_work_type,
@@ -58,7 +64,7 @@ export default function RMSubmissions() {
         rm_notes: f.rm_notes,
         rm_payment: f.rm_payment ? Number(f.rm_payment) : null,
         rm_rate_pay: f.rm_rate_pay ? Number(f.rm_rate_pay) : null,
-        rm_score_0_5: f.rm_score_0_5 ? Number(f.rm_score_0_5) : null,
+        rm_score_0_5: boundedScore,
         rm_review_date: new Date().toISOString(),
       };
       const review = await rmReviewByRoleCandidate(i.role_id, i.candidate_id, payload);

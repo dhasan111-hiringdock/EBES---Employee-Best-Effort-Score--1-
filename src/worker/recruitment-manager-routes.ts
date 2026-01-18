@@ -1607,7 +1607,10 @@ app.get("/api/rm/ebes-score", rmOnly, async (c) => {
     // CV Quality bonus for RM (based on team submission quality)
     const percents = (submissions.results || [])
       .filter((s: any) => s.entry_type === 'submission' && typeof (s as any).cv_match_percent === 'number')
-      .map((s: any) => (s as any).cv_match_percent as number);
+      .map((s: any) => {
+        const v = (s as any).cv_match_percent as number;
+        return Math.max(0, Math.min(100, v));
+      });
     const cv_quality_average = percents.length > 0
       ? percents.reduce((a: number, b: number) => a + b, 0) / percents.length
       : 0;
@@ -1824,7 +1827,10 @@ app.get('/api/rm/analytics-comprehensive', rmOnly, async (c) => {
 
     const overviewSubmissionPercents = (allSubmissions || [])
       .filter((s: any) => s.entry_type === 'submission' && typeof (s as any).cv_match_percent === 'number')
-      .map((s: any) => (s as any).cv_match_percent as number);
+      .map((s: any) => {
+        const v = (s as any).cv_match_percent as number;
+        return Math.max(0, Math.min(100, v));
+      });
     const overview_cv_quality_average = overviewSubmissionPercents.length > 0
       ? overviewSubmissionPercents.reduce((a: number, b: number) => a + b, 0) / overviewSubmissionPercents.length
       : 0;
@@ -1863,7 +1869,10 @@ app.get('/api/rm/analytics-comprehensive', rmOnly, async (c) => {
       
       const teamPercents = teamSubs
         .filter((s: any) => s.entry_type === 'submission' && typeof (s as any).cv_match_percent === 'number')
-        .map((s: any) => (s as any).cv_match_percent as number);
+        .map((s: any) => {
+          const v = (s as any).cv_match_percent as number;
+          return Math.max(0, Math.min(100, v));
+        });
       const team_cv_quality_average = teamPercents.length > 0
         ? teamPercents.reduce((a: number, b: number) => a + b, 0) / teamPercents.length
         : 0;
@@ -1978,7 +1987,10 @@ app.get('/api/rm/analytics-comprehensive', rmOnly, async (c) => {
 
       const recPercents = recSubs
         .filter((s: any) => s.entry_type === 'submission' && typeof (s as any).cv_match_percent === 'number')
-        .map((s: any) => (s as any).cv_match_percent as number);
+        .map((s: any) => {
+          const v = (s as any).cv_match_percent as number;
+          return Math.max(0, Math.min(100, v));
+        });
       const recruiter_cv_quality_average = recPercents.length > 0
         ? recPercents.reduce((a: number, b: number) => a + b, 0) / recPercents.length
         : 0;
@@ -2029,7 +2041,10 @@ app.get('/api/rm/analytics-comprehensive', rmOnly, async (c) => {
 
       const clientPercents = clientSubs
         .filter((s: any) => s.entry_type === 'submission' && typeof (s as any).cv_match_percent === 'number')
-        .map((s: any) => (s as any).cv_match_percent as number);
+        .map((s: any) => {
+          const v = (s as any).cv_match_percent as number;
+          return Math.max(0, Math.min(100, v));
+        });
       const client_cv_quality_average = clientPercents.length > 0
         ? clientPercents.reduce((a: number, b: number) => a + b, 0) / clientPercents.length
         : 0;
@@ -2324,41 +2339,41 @@ app.get("/api/rm/role-submissions/:roleId", rmOnly, async (c) => {
   if (!access) return c.json({ error: "Forbidden" }, 403);
 
   try {
-    const rows = await db.prepare(`
-      SELECT 
-        cra.id as association_id,
-        cra.candidate_id,
-        c.name as candidate_name,
-        c.email as candidate_email,
-        c.phone as candidate_phone,
-        cra.status as association_status,
-        cra.submission_date,
-        cra.is_discarded,
-        cra.discarded_at,
-        cra.discarded_reason,
-        cra.updated_at,
-        u.name as recruiter_name,
-        u.user_code as recruiter_code,
-        rs.id as submission_id,
-        ROUND(rs.cv_match_percent / 20.0, 2) as score,
-        rs.rm_validation_status,
-        rs.rm_rate_bill,
-        rs.rm_rate_pay,
-        rs.rm_location,
-        rs.rm_work_type,
-        rs.rm_notes,
-        rs.rm_reviewed_at
-      FROM candidate_role_associations cra
-      LEFT JOIN candidates c ON cra.candidate_id = c.id
-      LEFT JOIN users u ON cra.recruiter_user_id = u.id
-      LEFT JOIN recruiter_submissions rs 
-        ON rs.role_id = cra.role_id 
-       AND rs.recruiter_user_id = cra.recruiter_user_id 
-       AND rs.entry_type = 'submission'
-       AND DATE(rs.submission_date) = DATE(cra.submission_date)
-      WHERE cra.role_id = ?
-      ORDER BY cra.submission_date DESC, cra.id DESC
-    `).bind(roleId).all();
+      const rows = await db.prepare(`
+        SELECT 
+          cra.id as association_id,
+          cra.candidate_id,
+          c.name as candidate_name,
+          c.email as candidate_email,
+          c.phone as candidate_phone,
+          cra.status as association_status,
+          cra.submission_date,
+          cra.is_discarded,
+          cra.discarded_at,
+          cra.discarded_reason,
+          cra.updated_at,
+          u.name as recruiter_name,
+          u.user_code as recruiter_code,
+          rs.id as submission_id,
+          ROUND((CASE WHEN rs.cv_match_percent < 0 THEN 0 WHEN rs.cv_match_percent > 100 THEN 100 ELSE rs.cv_match_percent END) / 20.0, 2) as score,
+          rs.rm_validation_status,
+          rs.rm_rate_bill,
+          rs.rm_rate_pay,
+          rs.rm_location,
+          rs.rm_work_type,
+          rs.rm_notes,
+          rs.rm_reviewed_at
+        FROM candidate_role_associations cra
+        LEFT JOIN candidates c ON cra.candidate_id = c.id
+        LEFT JOIN users u ON cra.recruiter_user_id = u.id
+        LEFT JOIN recruiter_submissions rs 
+          ON rs.role_id = cra.role_id 
+         AND rs.recruiter_user_id = cra.recruiter_user_id 
+         AND rs.entry_type = 'submission'
+         AND DATE(rs.submission_date) = DATE(cra.submission_date)
+        WHERE cra.role_id = ?
+        ORDER BY cra.submission_date DESC, cra.id DESC
+      `).bind(roleId).all();
 
   const results = rows.results || [];
   
@@ -2443,6 +2458,10 @@ app.put("/api/rm/submissions/:id/review", rmOnly, async (c) => {
     }
   }
 
+  const rmScore = body.rm_score_0_5 != null ? Number(body.rm_score_0_5) : null;
+  const boundedScore = rmScore != null ? Math.max(0, Math.min(5, rmScore)) : null;
+  const cvPercent = boundedScore != null ? Math.max(0, Math.min(100, boundedScore * 20)) : null;
+
   await db.prepare(`
     UPDATE recruiter_submissions SET
       rm_validation_status = COALESCE(?, rm_validation_status),
@@ -2461,7 +2480,7 @@ app.put("/api/rm/submissions/:id/review", rmOnly, async (c) => {
     body.rm_rate_pay || null,
     body.rm_location || null,
     workType,
-    body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+    cvPercent,
     body.rm_notes || null,
     body.rm_review_date || null,
     id
@@ -2515,6 +2534,9 @@ app.post("/api/rm/roles/:roleId/candidates/:candidateId/send-to-am", rmOnly, asy
   if (!s || s.rm_rate_bill == null) missing.push("payment");
   if (!s || !s.rm_work_type) missing.push("contract type");
   if (!s || s.cv_match_percent == null) missing.push("validation score");
+  if (s && typeof s.cv_match_percent === 'number' && (s.cv_match_percent < 0 || s.cv_match_percent > 100)) {
+    missing.push("validation score must be between 0–5");
+  }
   if (!s || !s.rm_validation_status) missing.push("validation status");
   if (!s || !s.rm_notes) missing.push("notes");
   if (!s || !s.rm_location) missing.push("location");
@@ -2583,6 +2605,9 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
   if (!sub) {
     try {
       const cand = await db.prepare("SELECT name FROM candidates WHERE id = ?").bind(candidateId).first();
+      const rmScoreCreate = body.rm_score_0_5 != null ? Number(body.rm_score_0_5) : null;
+      const boundedScoreCreate = rmScoreCreate != null ? Math.max(0, Math.min(5, rmScoreCreate)) : null;
+      const cvPercentCreate = boundedScoreCreate != null ? Math.max(0, Math.min(100, boundedScoreCreate * 20)) : null;
       const created = await db.prepare(`
         INSERT INTO recruiter_submissions
         (recruiter_user_id, client_id, team_id, role_id, account_manager_id, recruitment_manager_id, submission_type, submission_date, notes, entry_type, interview_level, candidate_name, rm_validation_status, rm_rate_bill, rm_rate_pay, rm_location, rm_work_type, cv_match_percent, rm_notes, rm_reviewed_at, created_at, updated_at)
@@ -2606,7 +2631,7 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
           if (wt === 'payroll') return 'Payroll';
           return null;
         })(),
-        body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+        cvPercentCreate,
         body.rm_notes || null
       ).run();
       const newId = created.meta.last_row_id;
@@ -2636,7 +2661,7 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
         body.rm_rate_pay != null ? Number(body.rm_rate_pay) : null,
         body.rm_location || null,
         workType,
-        body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+        cvPercentCreate,
         body.rm_notes || null,
         body.rm_review_date || null,
         subObj.id
@@ -2654,6 +2679,10 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
     else if (wt === 'payroll') workType = 'Payroll';
     else workType = null;
   }
+
+  const rmScoreUpdate = body.rm_score_0_5 != null ? Number(body.rm_score_0_5) : null;
+  const boundedScoreUpdate = rmScoreUpdate != null ? Math.max(0, Math.min(5, rmScoreUpdate)) : null;
+  const cvPercentUpdate = boundedScoreUpdate != null ? Math.max(0, Math.min(100, boundedScoreUpdate * 20)) : null;
 
   try {
     await db.prepare(`
@@ -2674,7 +2703,7 @@ app.put("/api/rm/roles/:roleId/candidates/:candidateId/review", rmOnly, async (c
       body.rm_rate_pay != null ? Number(body.rm_rate_pay) : null,
       body.rm_location || null,
       workType,
-      body.rm_score_0_5 != null ? Number(body.rm_score_0_5) * 20 : null,
+      cvPercentUpdate,
       body.rm_notes || null,
       body.rm_review_date || null,
       (sub as any).id

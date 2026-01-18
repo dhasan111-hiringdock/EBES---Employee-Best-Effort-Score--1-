@@ -627,6 +627,14 @@ export default function RMRoles() {
   const saveReview = async (submissionId?: number, roleId?: number, candidateId?: number, associationId?: number) => {
     const key = submissionId ?? associationId;
     const payload = key != null ? (reviewEdits[key] || {}) : {};
+    if (payload.rm_score_0_5 != null) {
+      const raw = Number(payload.rm_score_0_5);
+      if (isNaN(raw) || raw < 0 || raw > 5) {
+        alert('Score must be between 0 and 5');
+        return;
+      }
+      payload.rm_score_0_5 = String(Math.max(0, Math.min(5, raw)));
+    }
     let res: Response | null = null;
     if (submissionId) {
       res = await rmReviewSubmission(submissionId, payload);

@@ -2140,7 +2140,10 @@ app.get("/api/recruiter/analytics", recruiterOnly, async (c) => {
 
     const submissionPercents = results
       .filter((s: any) => s.entry_type === 'submission' && typeof s.cv_match_percent === 'number')
-      .map((s: any) => s.cv_match_percent as number);
+      .map((s: any) => {
+        const v = s.cv_match_percent as number;
+        return Math.max(0, Math.min(100, v));
+      });
     const cv_quality_average = submissionPercents.length > 0
       ? submissionPercents.reduce((a: number, b: number) => a + b, 0) / submissionPercents.length
       : 0;

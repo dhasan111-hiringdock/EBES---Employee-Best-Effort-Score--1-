@@ -9,6 +9,11 @@ interface Client {
   team_id?: number;
   team_name?: string;
 }
+interface Team {
+  id: number;
+  name: string;
+  team_code: string;
+}
  
 interface Role {
   id: number;
@@ -67,6 +72,8 @@ interface PipelineData {
 export default function RecruiterPipeline() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [pipeline, setPipeline] = useState<PipelineData | null>(null);
   const [rolesLoading, setRolesLoading] = useState(false);
@@ -104,6 +111,22 @@ export default function RecruiterPipeline() {
   }, []);
  
   useEffect(() => {
+    const loadTeams = async () => {
+      try {
+        const res = await fetchWithAuth("/api/recruiter/teams");
+        if (res.ok) {
+          const data = await res.json();
+          setTeams(data || []);
+          if ((data || []).length > 0) {
+            setSelectedTeamId((data[0] as any).id);
+          }
+        }
+      } catch {}
+    };
+    loadTeams();
+  }, []);
+ 
+  useEffect(() => {
     const loadPipeline = async () => {
       setLoading(true);
       try {
@@ -126,16 +149,15 @@ export default function RecruiterPipeline() {
  
   useEffect(() => {
     const loadRoles = async () => {
-      if (!selectedClientId) {
+      if (!selectedClientId && !selectedTeamId) {
         setRoles([]);
         return;
       }
       setRolesLoading(true);
       try {
-        const client = clients.find((c) => c.id === selectedClientId);
         const params = new URLSearchParams();
-        params.set("client_id", String(selectedClientId));
-        if (client?.team_id) params.set("team_id", String(client.team_id));
+        if (selectedClientId != null) params.set("client_id", String(selectedClientId));
+        if (selectedTeamId != null) params.set("team_id", String(selectedTeamId));
         params.set("is_active", roleStatus === "active" ? "1" : "0");
         if (search.trim().length > 0) params.set("search", search.trim());
         const res = await fetchWithAuth(`/api/recruiter/roles-list?${params.toString()}`);
@@ -152,7 +174,7 @@ export default function RecruiterPipeline() {
       }
     };
     loadRoles();
-  }, [selectedClientId, roleStatus, search, clients, refreshToken]);
+  }, [selectedClientId, selectedTeamId, roleStatus, search, refreshToken]);
 
   const loadRoleCandidates = async (roleId: number) => {
     try {
@@ -214,8 +236,7 @@ export default function RecruiterPipeline() {
  
   const populateSampleData = async () => {
     try {
-      const client = clients.find((c) => c.id === (selectedClientId ?? -1));
-      const res = await recruiterSeedSampleData(6, selectedClientId ?? undefined, client?.team_id ?? undefined);
+      const res = await recruiterSeedSampleData(6, selectedClientId ?? undefined, selectedTeamId ?? undefined);
       if (res.ok) {
         setRefreshToken((x) => x + 1);
       }
@@ -314,6 +335,19 @@ export default function RecruiterPipeline() {
               </option>
             ))}
             {!clients.length && <option value="">No clients</option>}
+          </select>
+          <select
+            value={selectedTeamId ?? ""}
+            onChange={(e) => setSelectedTeamId(e.target.value ? Number(e.target.value) : null)}
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            title="Team"
+          >
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+            {!teams.length && <option value="">No teams</option>}
           </select>
           <button
             onClick={populateSampleData}
