@@ -6,7 +6,7 @@ import DeleteRoleModal from "./DeleteRoleModal";
 import ChangeStatusModal from "./ChangeStatusModal";
 import AddInterviewModal from "./AddInterviewModal";
 import RoleCard from "./RoleCard";
-import { fetchWithAuth, amDiscardCandidate, amSubmitCandidateToClient, amClientRejectCandidate, amPullOutCandidate, amMarkDeal, amReviewSubmission } from "@/react-app/utils/api";
+import { fetchWithAuth, amDiscardCandidate, amSubmitCandidateToClient, amClientRejectCandidate, amPullOutCandidate, amMarkDeal, amReviewSubmission, rmDiscardCandidate } from "@/react-app/utils/api";
 
 interface Role {
   id: number;
@@ -33,9 +33,19 @@ interface Role {
 interface RoleManagementProps {
   clientId: number;
   teamId: number;
+  mode?: "am" | "rm";
+  allowedActions?: {
+    create?: boolean;
+    edit?: boolean;
+    delete?: boolean;
+    changeStatus?: boolean;
+    addInterview?: boolean;
+    submissionsActions?: boolean;
+    saveNotes?: boolean;
+  };
 }
 
-export default function RoleManagement({ clientId, teamId }: RoleManagementProps) {
+export default function RoleManagement({ clientId, teamId, mode = "am", allowedActions }: RoleManagementProps) {
   const [activeTab, setActiveTab] = useState<"active" | "non-active">("active");
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +61,14 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
 
   const underCons = roleSubmissions.under_consideration || [];
   
+  const prefix = mode === "rm" ? "rm" : "am";
+  const canCreate = allowedActions?.create !== false;
+  const canEdit = allowedActions?.edit !== false;
+  const canDelete = allowedActions?.delete !== false;
+  const canChangeStatus = allowedActions?.changeStatus !== false;
+  const canAddInterview = allowedActions?.addInterview !== false;
+  const canSubmissionActions = allowedActions?.submissionsActions !== false;
+  const canSaveNotes = allowedActions?.saveNotes !== false;
 
   const renderSubmissionRow = (item: any) => (
     <tr key={item.association_id} className="border-b border-gray-200 hover:bg-gray-50">
@@ -82,14 +100,18 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         )}
       </td>
       <td className="py-2 px-3">
-        <textarea
-          placeholder="Add notes"
-          defaultValue={item.am_notes || ''}
-          onChange={(e) => setNotesEdits(prev => ({ ...prev, [(item.submission_id || 0)]: e.target.value }))}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-          rows={2}
-          disabled={!item.submission_id}
-        />
+        {canSaveNotes ? (
+          <textarea
+            placeholder="Add notes"
+            defaultValue={item.am_notes || ''}
+            onChange={(e) => setNotesEdits(prev => ({ ...prev, [(item.submission_id || 0)]: e.target.value }))}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            rows={2}
+            disabled={!item.submission_id}
+          />
+        ) : (
+          <div className="text-xs text-gray-400">—</div>
+        )}
       </td>
       <td className="py-2 px-3">
         <div className="flex items-center gap-2">
@@ -99,50 +121,58 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
               Deal
             </span>
           ) : (
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v || !submissionsRole) return;
-                const roleId = submissionsRole.id;
-                if (item.association_status === 'client_submitted') {
-                  if (v === 'client_reject') clientReject(roleId, item.candidate_id);
-                  else if (v === 'pull_out') pullOut(roleId, item.candidate_id);
-                  else if (v === 'deal') markDeal(roleId, item.candidate_id);
-                } else {
-                  if (v === 'submit_to_client') submitToClient(roleId, item.candidate_id);
-                  else if (v === 'reject') discardCandidate(roleId, item.candidate_id);
-                }
-                e.currentTarget.value = '';
-              }}
-              className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
-            >
-              <option value="" disabled>Choose Action</option>
-              {item.association_status === 'client_submitted' ? (
-                <>
-                  <option value="client_reject">Client Rejected</option>
-                  <option value="pull_out">Pull Out</option>
-                  <option value="deal">Deal</option>
-                </>
-              ) : (
-                <>
-                  <option value="submit_to_client">Submit to Client</option>
-                  <option value="reject">Discard</option>
-                </>
-              )}
-            </select>
+            canSubmissionActions ? (
+              <select
+                defaultValue=""
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v || !submissionsRole) return;
+                  const roleId = submissionsRole.id;
+                  if (item.association_status === 'client_submitted') {
+                    if (v === 'client_reject') clientReject(roleId, item.candidate_id);
+                    else if (v === 'pull_out') pullOut(roleId, item.candidate_id);
+                    else if (v === 'deal') markDeal(roleId, item.candidate_id);
+                  } else {
+                    if (v === 'submit_to_client') submitToClient(roleId, item.candidate_id);
+                    else if (v === 'reject') discardCandidate(roleId, item.candidate_id);
+                  }
+                  e.currentTarget.value = '';
+                }}
+                className="px-3 py-2 text-sm border border-gray-300 rounded-lg"
+              >
+                <option value="" disabled>Choose Action</option>
+                {item.association_status === 'client_submitted' ? (
+                  <>
+                    <option value="client_reject">Client Rejected</option>
+                    <option value="pull_out">Pull Out</option>
+                    <option value="deal">Deal</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="submit_to_client">Submit to Client</option>
+                    <option value="reject">Discard</option>
+                  </>
+                )}
+              </select>
+            ) : (
+              <span className="text-xs text-gray-400">—</span>
+            )
           )}
         </div>
       </td>
       <td className="py-2 px-3 text-right">
-        <button
-          onClick={() => saveNotes(item.submission_id)}
-          disabled={!item.submission_id}
-          className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50 justify-center ml-auto"
-        >
-          <Save className="w-4 h-4" />
-          Save
-        </button>
+        {canSaveNotes ? (
+          <button
+            onClick={() => saveNotes(item.submission_id)}
+            disabled={!item.submission_id}
+            className="px-3 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50 justify-center ml-auto"
+          >
+            <Save className="w-4 h-4" />
+            Save
+          </button>
+        ) : (
+          <span className="text-xs text-gray-400">—</span>
+        )}
       </td>
     </tr>
   );
@@ -161,7 +191,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         client_id: clientId.toString(),
         team_id: teamId.toString(),
       });
-      const response = await fetchWithAuth(`/api/am/roles?${params}`);
+      const response = await fetchWithAuth(`/api/${prefix}/roles?${params}`);
       if (response.ok) {
         const data = await response.json();
         setRoles(data);
@@ -184,7 +214,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   const loadRoleSubmissions = async (roleId: number) => {
     try {
       setLoadingSubmissions(true);
-      const res = await fetchWithAuth(`/api/am/role-submissions/${roleId}`);
+      const res = await fetchWithAuth(`/api/${prefix}/role-submissions/${roleId}`);
       if (res.ok) {
         const data = await res.json();
         setRoleSubmissions(data);
@@ -196,7 +226,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
   };
 
   const discardCandidate = async (roleId: number, candidateId: number) => {
-    const res = await amDiscardCandidate(roleId, candidateId, undefined);
+    const res = prefix === "rm" ? await rmDiscardCandidate(roleId, candidateId, undefined) : await amDiscardCandidate(roleId, candidateId, undefined);
     if (res.ok && submissionsRole) {
       await loadRoleSubmissions(submissionsRole.id);
     }
@@ -251,13 +281,15 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
             Manage roles and track interview progress
           </p>
         </div>
-        <button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-        >
-          <Plus className="w-4 h-4" />
-          Create Role
-        </button>
+        {canCreate && (
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            Create Role
+          </button>
+        )}
       </div>
 
       {showLimitWarning && (
@@ -316,10 +348,10 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
                 <RoleCard
                   key={role.id}
                   role={role}
-                  onEdit={() => setEditingRole(role)}
-                  onDelete={() => setDeletingRole(role)}
-                  onChangeStatus={() => setChangingStatusRole(role)}
-                  onAddInterview={() => setAddingInterviewRole(role)}
+                  onEdit={canEdit ? (() => setEditingRole(role)) : undefined}
+                  onDelete={canDelete ? (() => setDeletingRole(role)) : undefined}
+                  onChangeStatus={canChangeStatus ? (() => setChangingStatusRole(role)) : undefined}
+                  onAddInterview={canAddInterview ? (() => setAddingInterviewRole(role)) : undefined}
                   onViewSubmissions={() => openSubmissions(role)}
                 />
               ))}
@@ -402,34 +434,42 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => setAddingInterviewRole(role)}
-                            className="px-3 py-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 rounded border border-teal-200 transition-colors"
-                            title="Add Interview"
-                          >
-                            + Interview
-                          </button>
-                          <button
-                            onClick={() => setChangingStatusRole(role)}
-                            className="px-3 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded border border-blue-200 transition-colors"
-                            title="Change Status"
-                          >
-                            Status
-                          </button>
-                          <button
-                            onClick={() => setEditingRole(role)}
-                            className="px-3 py-1 text-xs bg-gray-50 text-gray-700 hover:bg-gray-100 rounded border border-gray-200 transition-colors"
-                            title="Edit"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => setDeletingRole(role)}
-                            className="px-3 py-1 text-xs bg-red-50 text-red-700 hover:bg-red-100 rounded border border-red-200 transition-colors"
-                            title="Delete"
-                          >
-                            Delete
-                          </button>
+                          {canAddInterview && (
+                            <button
+                              onClick={() => setAddingInterviewRole(role)}
+                              className="px-3 py-1 text-xs bg-teal-50 text-teal-700 hover:bg-teal-100 rounded border border-teal-200 transition-colors"
+                              title="Add Interview"
+                            >
+                              + Interview
+                            </button>
+                          )}
+                          {canChangeStatus && (
+                            <button
+                              onClick={() => setChangingStatusRole(role)}
+                              className="px-3 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded border border-blue-200 transition-colors"
+                              title="Change Status"
+                            >
+                              Status
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button
+                              onClick={() => setEditingRole(role)}
+                              className="px-3 py-1 text-xs bg-gray-50 text-gray-700 hover:bg-gray-100 rounded border border-gray-200 transition-colors"
+                              title="Edit"
+                            >
+                              Edit
+                            </button>
+                          )}
+                          {canDelete && (
+                            <button
+                              onClick={() => setDeletingRole(role)}
+                              className="px-3 py-1 text-xs bg-red-50 text-red-700 hover:bg-red-100 rounded border border-red-200 transition-colors"
+                              title="Delete"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -441,7 +481,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         </div>
       </div>
 
-      {isCreateModalOpen && (
+      {isCreateModalOpen && canCreate && (
         <CreateRoleModal
           onClose={() => setIsCreateModalOpen(false)}
           onRoleCreated={() => {
@@ -451,7 +491,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         />
       )}
 
-      {editingRole && (
+      {editingRole && canEdit && (
         <EditRoleModal
           role={editingRole}
           onClose={() => setEditingRole(null)}
@@ -462,7 +502,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         />
       )}
 
-      {deletingRole && (
+      {deletingRole && canDelete && (
         <DeleteRoleModal
           role={deletingRole}
           onClose={() => setDeletingRole(null)}
@@ -473,7 +513,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         />
       )}
 
-      {changingStatusRole && (
+      {changingStatusRole && canChangeStatus && (
         <ChangeStatusModal
           role={changingStatusRole}
           onClose={() => setChangingStatusRole(null)}
@@ -484,7 +524,7 @@ export default function RoleManagement({ clientId, teamId }: RoleManagementProps
         />
       )}
 
-      {addingInterviewRole && (
+      {addingInterviewRole && canAddInterview && (
         <AddInterviewModal
           role={addingInterviewRole}
           onClose={() => setAddingInterviewRole(null)}

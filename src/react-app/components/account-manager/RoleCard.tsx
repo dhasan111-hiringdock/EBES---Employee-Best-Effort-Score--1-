@@ -23,10 +23,10 @@ interface Role {
 
 interface RoleCardProps {
   role: Role;
-  onEdit: () => void;
-  onDelete: () => void;
-  onChangeStatus: () => void;
-  onAddInterview: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onChangeStatus?: () => void;
+  onAddInterview?: () => void;
   onViewSubmissions?: () => void;
 }
 
@@ -127,37 +127,45 @@ export default function RoleCard({
       </div>
 
       <div className="flex gap-2">
-        <button
-          onClick={onEdit}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          title="Edit role"
-        >
-          <Edit className="w-3 h-3" />
-          Edit
-        </button>
-        <button
-          onClick={onChangeStatus}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          title="Change status"
-        >
-          <RefreshCw className="w-3 h-3" />
-          Status
-        </button>
-        <button
-          onClick={onViewSubmissions}
-          className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          title="View submissions"
-        >
-          <Eye className="w-3 h-3" />
-          Details
-        </button>
-        <button
-          onClick={onDelete}
-          className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-          title="Delete role"
-        >
-          <Trash2 className="w-3 h-3" />
-        </button>
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Edit role"
+          >
+            <Edit className="w-3 h-3" />
+            Edit
+          </button>
+        )}
+        {onChangeStatus && (
+          <button
+            onClick={onChangeStatus}
+            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title="Change status"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Status
+          </button>
+        )}
+        {onViewSubmissions && (
+          <button
+            onClick={onViewSubmissions}
+            className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            title="View submissions"
+          >
+            <Eye className="w-3 h-3" />
+            Details
+          </button>
+        )}
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            title="Delete role"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        )}
       </div>
     </div>
   );

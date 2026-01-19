@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckCircle, XCircle, Download } from "lucide-react";
-import { fetchWithAuth, amSubmitCandidateToClient, amClientRejectCandidate, amDiscardCandidate, getAmRoleSubmissions, amMarkDeal, amReviewSubmission } from "@/react-app/utils/api";
+import { fetchWithAuth, amSubmitCandidateToClient, amClientRejectCandidate, amDiscardCandidate, getAmRoleSubmissions, amMarkDeal, amReviewSubmission, rmSendCandidateToAM, rmDiscardCandidate, getRmRoleSubmissions, rmReviewSubmission } from "@/react-app/utils/api";
 import { useLocation } from "react-router";
 
 interface Role {
@@ -38,9 +38,10 @@ interface RoleSubmission {
 interface PipelineProps {
   clientId: number;
   teamId: number;
+  mode?: "am" | "rm";
 }
 
-export default function Pipeline({ clientId, teamId }: PipelineProps) {
+export default function Pipeline({ clientId, teamId, mode = "am" }: PipelineProps) {
   const [loading, setLoading] = useState(true);
   const [roles, setRoles] = useState<Role[]>([]);
   const [dataByRole, setDataByRole] = useState<Record<number, { under_consideration: RoleSubmission[]; rejected: RoleSubmission[] }>>({});
@@ -60,6 +61,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   interface Team { id: number; name: string; team_code: string; }
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<number>(teamId);
+  const prefix = mode === "rm" ? "rm" : "am";
 
   const formatPayment = (row: RoleSubmission) => {
     if (row.rm_rate_bill == null) return "-";
@@ -92,21 +94,24 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
           client_id: String(selectedClientId || clientId),
           team_id: String(selectedTeamId || teamId),
         });
-        const res = await fetchWithAuth(`/api/am/roles?${params}`);
+        const res = await fetchWithAuth(`/api/${prefix}/roles?${params}`);
         if (!res.ok) return;
         const rolesData: Role[] = await res.json();
-        console.log("AMPipeline roles payload", Array.isArray(rolesData) ? rolesData.length : null, Array.isArray(rolesData) ? rolesData.slice(0,1) : rolesData);
+        console.log("Pipeline roles payload", Array.isArray(rolesData) ? rolesData.length : null, Array.isArray(rolesData) ? rolesData.slice(0,1) : rolesData);
         if (Array.isArray(rolesData) && rolesData.length === 0) {
-          console.warn("AMPipeline empty roles", { selectedStatus, selectedClientId, selectedTeamId });
+          console.warn("Pipeline empty roles", { selectedStatus, selectedClientId, selectedTeamId, prefix });
         }
         setRoles(rolesData);
 
         const results = await Promise.all(
           (rolesData || []).map(async (role) => {
-            const r = await fetchWithAuth(`/api/am/role-submissions/${role.id}`);
+            const r = await fetchWithAuth(`/api/${prefix}/role-submissions/${role.id}`);
             if (!r.ok) return { roleId: role.id, under_consideration: [], rejected: [] };
             const payload = await r.json();
-            return { roleId: role.id, under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] };
+            const under = (payload.under_consideration || []) as RoleSubmission[];
+            const pending = (payload.pending_evaluation || []) as RoleSubmission[];
+            const combined = mode === "rm" ? [...pending, ...under] : under;
+            return { roleId: role.id, under_consideration: combined || [], rejected: payload.rejected || [] };
           })
         );
 
@@ -125,7 +130,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
   useEffect(() => {
     const loadAssignments = async () => {
       try {
-        const res = await fetchWithAuth("/api/am/assignments");
+        const res = await fetchWithAuth(`/api/${prefix}/assignments`);
         if (!res.ok) return;
         const data = await res.json();
         setClients(data.clients || []);
@@ -207,6 +212,7 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
 
 
   const markDeal = async (roleId: number, candidateId: number) => {
+    if (mode !== "am") return;
     const res = await amMarkDeal(roleId, candidateId);
     if (res.ok) {
       const r = await getAmRoleSubmissions(roleId);
@@ -225,15 +231,15 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
         setNoteError("Please add a note");
         return;
       }
-      const res = await amDiscardCandidate(dlg.roleId, dlg.candidateId, noteText || undefined);
+      const res = mode === "rm" ? await rmDiscardCandidate(dlg.roleId, dlg.candidateId, noteText || undefined) : await amDiscardCandidate(dlg.roleId, dlg.candidateId, noteText || undefined);
       if (res.ok) {
-        const r = await getAmRoleSubmissions(dlg.roleId);
+        const r = mode === "rm" ? await getRmRoleSubmissions(dlg.roleId) : await getAmRoleSubmissions(dlg.roleId);
         if (r.ok) {
           const payload = await r.json();
           setDataByRole((prev) => ({ ...prev, [dlg.roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
         }
       }
-    } else if (dlg.type === 'client_reject') {
+    } else if (dlg.type === 'client_reject' && mode === "am") {
       if (!noteText.trim()) {
         setNoteError("Please add a note");
         return;
@@ -250,12 +256,15 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
         }
       }
     } else if (dlg.type === 'submit_client') {
-      const res = await amSubmitCandidateToClient(dlg.roleId, dlg.candidateId);
+      const res = mode === "rm" ? await rmSendCandidateToAM(dlg.roleId, dlg.candidateId) : await amSubmitCandidateToClient(dlg.roleId, dlg.candidateId);
       if (res.ok) {
-        if ((dlg.submissionId ?? 0) > 0 && noteText.trim().length > 0) {
+        if (mode === "am" && (dlg.submissionId ?? 0) > 0 && noteText.trim().length > 0) {
           await amReviewSubmission(dlg.submissionId!, { am_notes: noteText.trim() });
         }
-        const r = await getAmRoleSubmissions(dlg.roleId);
+        if (mode === "rm" && (dlg.submissionId ?? 0) > 0 && noteText.trim().length > 0) {
+          await rmReviewSubmission(dlg.submissionId!, { rm_notes: noteText.trim() } as any);
+        }
+        const r = mode === "rm" ? await getRmRoleSubmissions(dlg.roleId) : await getAmRoleSubmissions(dlg.roleId);
         if (r.ok) {
           const payload = await r.json();
           setDataByRole((prev) => ({ ...prev, [dlg.roleId]: { under_consideration: payload.under_consideration || [], rejected: payload.rejected || [] } }));
@@ -504,33 +513,49 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
                               </button>
                               {openMenuFor === `${role.id}:${row.candidate_id}` && (
                                 <div className="absolute z-10 mt-2 bg-white border border-gray-200 rounded shadow-lg p-2 w-48">
-                                  <button
-                                    className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                    onClick={() => {
-                                      setOpenMenuFor(null);
-                                      setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'submit_client', submissionId: row.submission_id });
-                                    }}
-                                  >
-                                    Submit to Client
-                                  </button>
-                                  <button
-                                    className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                    onClick={() => {
-                                      setOpenMenuFor(null);
-                                      setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'client_reject', submissionId: row.submission_id });
-                                    }}
-                                  >
-                                    Client Rejected
-                                  </button>
-                                  <button
-                                    className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
-                                    onClick={() => {
-                                      setOpenMenuFor(null);
-                                      markDeal(role.id, row.candidate_id!);
-                                    }}
-                                  >
-                                    Deal
-                                  </button>
+                                  {mode === "am" ? (
+                                    <>
+                                      <button
+                                        className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
+                                        onClick={() => {
+                                          setOpenMenuFor(null);
+                                          setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'submit_client', submissionId: row.submission_id });
+                                        }}
+                                      >
+                                        Submit to Client
+                                      </button>
+                                      <button
+                                        className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
+                                        onClick={() => {
+                                          setOpenMenuFor(null);
+                                          setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'client_reject', submissionId: row.submission_id });
+                                        }}
+                                      >
+                                        Client Rejected
+                                      </button>
+                                      <button
+                                        className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
+                                        onClick={() => {
+                                          setOpenMenuFor(null);
+                                          markDeal(role.id, row.candidate_id!);
+                                        }}
+                                      >
+                                        Deal
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded"
+                                        onClick={() => {
+                                          setOpenMenuFor(null);
+                                          setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, type: 'submit_client', submissionId: row.submission_id });
+                                        }}
+                                      >
+                                        Send to AM
+                                      </button>
+                                    </>
+                                  )}
                                   <button
                                     className="w-full text-left px-2 py-1 text-sm hover:bg-gray-50 rounded text-red-600"
                                     onClick={() => {
