@@ -23,7 +23,6 @@ import {
 import { fetchWithAuth } from "@/react-app/utils/api";
 import {
   BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -34,6 +33,7 @@ import {
   ResponsiveContainer,
   Brush,
 } from "recharts";
+import { Bar } from "recharts/es6/cartesian/Bar";
 import ReportDownloadModal, { type ReportFilters } from "./ReportDownloadModal";
 
 interface UserStats {

@@ -90,19 +90,42 @@ function parseIntent(query: string):
   | "roles_search"
   | "unknown" {
   const lower = (query || "").toLowerCase();
+  if (/\bdeals?\s+(today|this week|this month|last month|this year)\b/.test(lower)) return "count_deals";
+  if (/\binterviews?\s+(today|this week|this month|last month|this year)\b/.test(lower)) return "count_interviews";
+  if (/\bworked\s+(on|with)\s+roles?\s+(today|this week|this month|last month|this year)\b/.test(lower)) return "roles_worked_with";
+  const hasList =
+    lower.includes("list") ||
+    lower.includes("show") ||
+    lower.includes("browse") ||
+    lower.includes("table");
+  const hasCount =
+    lower.includes("how many") ||
+    lower.includes("count") ||
+    lower.includes("number of");
+  const hasPeriodToken =
+    lower.includes("today") ||
+    lower.includes("this week") ||
+    lower.includes("this month") ||
+    lower.includes("last month") ||
+    lower.includes("this year");
+
   if (lower.includes("on hold")) return "roles_on_hold";
-  if (lower.includes("worked with")) return "roles_worked_with";
+  if (lower.includes("worked with") || lower.includes("worked on")) return "roles_worked_with";
   if (lower.includes("must start") || lower.includes("should start")) return "must_start";
-  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("deal")) return "count_deals";
-  if ((lower.includes("how many") || lower.includes("count")) && lower.includes("interview")) return "count_interviews";
+  if ((hasCount || (!hasList && (hasPeriodToken || lower.includes("this")))) && lower.includes("deal")) return "count_deals";
+  if ((hasCount || (!hasList && (hasPeriodToken || lower.includes("this")))) && lower.includes("interview")) return "count_interviews";
   if ((lower.includes("how many") || lower.includes("count")) && lower.includes("dropout")) return "count_dropouts";
   if ((lower.includes("how many") || lower.includes("count")) && lower.includes("submission")) return "count_submissions";
   if ((lower.includes("how many") || lower.includes("count")) && lower.includes("active role")) return "count_active_roles";
-  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("role")) return "list_roles";
-  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("deal")) return "list_deals";
-  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("interview")) return "list_interviews";
-  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("submission")) return "list_submissions";
-  if ((lower.includes("list") || lower.includes("show") || lower.includes("browse") || lower.includes("table")) && lower.includes("dropout")) return "list_dropouts";
+  if (hasList && lower.includes("role")) return "list_roles";
+  if (hasList && lower.includes("deal")) return "list_deals";
+  if (hasList && lower.includes("interview")) return "list_interviews";
+  if (hasList && lower.includes("submission")) return "list_submissions";
+  if (hasList && lower.includes("dropout")) return "list_dropouts";
+  if (!hasList && !hasCount) {
+    if (lower.includes("deal")) return "count_deals";
+    if (lower.includes("interview")) return "count_interviews";
+  }
   if (lower.includes("search role") || lower.includes("find role") || lower.includes("search roles") || lower.includes("find roles")) return "roles_search";
   return "unknown";
 }

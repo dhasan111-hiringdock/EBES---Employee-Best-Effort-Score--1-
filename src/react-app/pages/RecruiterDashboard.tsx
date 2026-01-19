@@ -26,19 +26,40 @@ export default function RecruiterDashboard() {
 
   const fetchClients = async () => {
     try {
-      console.log('Fetching clients...');
       const response = await fetchWithAuth('/api/recruiter/clients');
-      console.log('Clients response:', response.status);
-      
-      if (response.ok) {
-        const clientsData = await response.json();
-        console.log('Clients data:', clientsData);
-        setClients(clientsData);
-      } else {
-        console.error('Failed to fetch clients, status:', response.status);
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
+      const assignedClients = response.ok ? await response.json() : [];
+
+      // Fallback/union: include clients of active roles for recruiter's assigned teams
+      const teamsRes = await fetchWithAuth('/api/recruiter/teams');
+      const teamRows = teamsRes.ok ? await teamsRes.json() : [];
+      const teamIds = (teamRows || []).map((t: any) => t.id);
+
+      const roleClients: any[] = [];
+      for (const tid of teamIds) {
+        const rlRes = await fetchWithAuth(`/api/recruiter/roles-list?is_active=1&team_id=${tid}`);
+        if (rlRes.ok) {
+          const roles = await rlRes.json();
+          for (const r of roles || []) {
+            roleClients.push({
+              id: r.client_id,
+              name: r.client_name,
+              client_code: r.client_code,
+              team_id: r.team_id,
+              team_name: r.team_name,
+              team_code: r.team_code,
+            });
+          }
+        }
       }
+
+      const byId: Record<number, any> = {};
+      for (const c of assignedClients || []) {
+        byId[c.id] = c;
+      }
+      for (const c of roleClients) {
+        if (!byId[c.id]) byId[c.id] = c;
+      }
+      setClients(Object.values(byId));
     } catch (error) {
       console.error('Failed to fetch clients:', error);
     } finally {

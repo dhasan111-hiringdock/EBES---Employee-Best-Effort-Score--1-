@@ -6,7 +6,8 @@ import {
   Activity, Briefcase
 } from 'lucide-react';
 import { fetchWithAuth } from '@/react-app/utils/api';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Brush } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Brush } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 import ReportDownloadModal, { type ReportFilters } from '@/react-app/components/admin/ReportDownloadModal';
 
 interface AnalyticsData {

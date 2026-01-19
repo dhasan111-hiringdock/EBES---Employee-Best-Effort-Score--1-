@@ -158,7 +158,14 @@ app.get("/api/rm/teams", rmOnly, async (c) => {
   const rmUser = c.get("rmUser");
 
   try {
-    const teams = await db
+    const tableInfo = await db.prepare("PRAGMA table_info(am_roles)").all();
+    const hasRmId = (tableInfo.results || []).some((r: any) => (r as any).name === "recruitment_manager_id");
+    if (!hasRmId) {
+      try {
+        await db.prepare("ALTER TABLE am_roles ADD COLUMN recruitment_manager_id INTEGER").run();
+      } catch {}
+    }
+    const assignedTeams = await db
       .prepare(`
         SELECT t.* FROM app_teams t
         INNER JOIN team_assignments ta ON t.id = ta.team_id
@@ -167,7 +174,39 @@ app.get("/api/rm/teams", rmOnly, async (c) => {
       .bind((rmUser as any).id)
       .all();
 
-    return c.json(teams.results || []);
+    const rmId = (rmUser as any).id;
+    const roleTeamsDirect = await db
+      .prepare(`
+        SELECT DISTINCT t.* 
+        FROM app_teams t
+        INNER JOIN am_roles r ON r.team_id = t.id
+        WHERE r.recruitment_manager_id = ?
+      `)
+      .bind(rmId)
+      .all();
+    const roleTeamsMapped = await db
+      .prepare(`
+        SELECT DISTINCT t.* 
+        FROM app_teams t
+        INNER JOIN am_role_teams art ON art.team_id = t.id
+        INNER JOIN am_roles r ON r.id = art.role_id
+        WHERE r.recruitment_manager_id = ?
+      `)
+      .bind(rmId)
+      .all();
+
+    const byId: Record<number, any> = {};
+    for (const row of (assignedTeams.results || [])) {
+      byId[(row as any).id] = row;
+    }
+    for (const row of (roleTeamsDirect.results || [])) {
+      byId[(row as any).id] = row;
+    }
+    for (const row of (roleTeamsMapped.results || [])) {
+      byId[(row as any).id] = row;
+    }
+
+    return c.json(Object.values(byId));
   } catch (error) {
     return c.json({ error: "Failed to fetch teams" }, 500);
   }
@@ -179,7 +218,14 @@ app.get("/api/rm/clients", rmOnly, async (c) => {
   const rmUser = c.get("rmUser");
 
   try {
-    const clients = await db
+    const tableInfo = await db.prepare("PRAGMA table_info(am_roles)").all();
+    const hasRmId = (tableInfo.results || []).some((r: any) => (r as any).name === "recruitment_manager_id");
+    if (!hasRmId) {
+      try {
+        await db.prepare("ALTER TABLE am_roles ADD COLUMN recruitment_manager_id INTEGER").run();
+      } catch {}
+    }
+    const assignedClients = await db
       .prepare(`
         SELECT c.* FROM clients c
         INNER JOIN client_assignments ca ON c.id = ca.client_id
@@ -188,7 +234,26 @@ app.get("/api/rm/clients", rmOnly, async (c) => {
       .bind((rmUser as any).id)
       .all();
 
-    return c.json(clients.results || []);
+    const rmId = (rmUser as any).id;
+    const roleClients = await db
+      .prepare(`
+        SELECT DISTINCT c.*
+        FROM clients c
+        INNER JOIN am_roles r ON r.client_id = c.id
+        WHERE r.recruitment_manager_id = ?
+      `)
+      .bind(rmId)
+      .all();
+
+    const byId: Record<number, any> = {};
+    for (const row of (assignedClients.results || [])) {
+      byId[(row as any).id] = row;
+    }
+    for (const row of (roleClients.results || [])) {
+      byId[(row as any).id] = row;
+    }
+
+    return c.json(Object.values(byId));
   } catch (error) {
     return c.json({ error: "Failed to fetch clients" }, 500);
   }
@@ -227,6 +292,13 @@ app.post("/api/rm/roles", rmOnly, async (c) => {
       }
     }
 
+    const tableInfo = await db.prepare("PRAGMA table_info(am_roles)").all();
+    const hasRmId = (tableInfo.results || []).some((r: any) => (r as any).name === "recruitment_manager_id");
+    if (!hasRmId) {
+      try {
+        await db.prepare("ALTER TABLE am_roles ADD COLUMN recruitment_manager_id INTEGER").run();
+      } catch {}
+    }
     // Generate role code
     const codeCounter = await db
       .prepare("SELECT next_number FROM code_counters WHERE category = 'role'")
@@ -250,10 +322,10 @@ app.post("/api/rm/roles", rmOnly, async (c) => {
     const result = await db
       .prepare(`
         INSERT INTO am_roles (
-          role_code, client_id, team_id, account_manager_id, title, description, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'active', datetime('now'))
+          role_code, client_id, team_id, account_manager_id, recruitment_manager_id, title, description, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'))
       `)
-      .bind(roleCode, client_id, team_ids[0], account_manager_id, title, description || null)
+      .bind(roleCode, client_id, team_ids[0], account_manager_id, (rmUser as any).id, title, description || null)
       .run();
 
     const roleId = result.meta.last_row_id;
@@ -454,6 +526,13 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
   const searchQuery = c.req.query("search");
 
   try {
+    const tableInfo = await db.prepare("PRAGMA table_info(am_roles)").all();
+    const hasRmId = (tableInfo.results || []).some((r: any) => (r as any).name === "recruitment_manager_id");
+    if (!hasRmId) {
+      try {
+        await db.prepare("ALTER TABLE am_roles ADD COLUMN recruitment_manager_id INTEGER").run();
+      } catch {}
+    }
     // Get RM's assigned teams
     const teams = await db
       .prepare(`
@@ -478,9 +557,7 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
 
     const clientIds = (clients.results || []).map((c: any) => c.id);
 
-    if (teamIds.length === 0 && clientIds.length === 0) {
-      return c.json([]);
-    }
+    const rmId = (rmUser as any).id;
 
     // Build query to fetch roles for RM's assigned clients and teams
     let query = `
@@ -566,12 +643,18 @@ app.get("/api/rm/roles", rmOnly, async (c) => {
     const params: any[] = [];
 
     // Filter by RM's assigned teams and clients
-    if (teamIds.length > 0 && clientIds.length > 0) {
-      query += ` AND ((r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")}))) OR r.client_id IN (${clientIds.join(",")}))`;
-    } else if (teamIds.length > 0) {
-      query += ` AND (r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`;
-    } else if (clientIds.length > 0) {
-      query += ` AND r.client_id IN (${clientIds.join(",")})`;
+    if (teamIds.length === 0 && clientIds.length === 0) {
+      query += ` AND r.recruitment_manager_id = ?`;
+      params.push(rmId);
+    } else {
+      const teamFilter = teamIds.length > 0
+        ? `(r.team_id IN (${teamIds.join(",")}) OR r.id IN (SELECT role_id FROM am_role_teams WHERE team_id IN (${teamIds.join(",")})))`
+        : `0=1`;
+      const clientFilter = clientIds.length > 0
+        ? `r.client_id IN (${clientIds.join(",")})`
+        : `0=1`;
+      query += ` AND ( ${teamFilter} OR ${clientFilter} OR r.recruitment_manager_id = ? )`;
+      params.push(rmId);
     }
 
     // Apply status filter

@@ -1,5 +1,5 @@
 import { HelpCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 interface ScoreTooltipProps {
   type: 'ebes' | 'performance';
@@ -8,7 +8,7 @@ interface ScoreTooltipProps {
   className?: string;
 }
 
-export default function ScoreTooltip({ type, score, label, className = '' }: ScoreTooltipProps) {
+function ScoreTooltip({ type, score, label, className = '' }: ScoreTooltipProps) {
   const [showTooltip, setShowTooltip] = useState(false);
 
   // Handle undefined, null, or NaN scores
@@ -61,3 +61,4 @@ export default function ScoreTooltip({ type, score, label, className = '' }: Sco
     </div>
   );
 }
+export default memo(ScoreTooltip);

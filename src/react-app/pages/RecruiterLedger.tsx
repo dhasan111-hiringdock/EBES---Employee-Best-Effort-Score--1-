@@ -10,13 +10,15 @@ export default function RecruiterLedger() {
   const [search, setSearch] = useState<string>('');
   const [eventType, setEventType] = useState<'all' | 'submission' | 'rm_evaluation' | 'submitted' | 'client_submitted' | 'client_rejected' | 'interview' | 'deal' | 'discarded' | 'dropout'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_play' | 'positive' | 'negative'>('all');
+  const [roleLevel, setRoleLevel] = useState<'all' | 'junior' | 'mid' | 'senior'>('all');
+  const [outcome, setOutcome] = useState<'all' | 'submitted' | 'interviewed' | 'rejected' | 'hired'>('all');
   const [loading, setLoading] = useState(false);
   const [exportFormat, setExportFormat] = useState<'csv' | 'excel' | 'pdf'>('csv');
   const [tableLoading, setTableLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'roles' | 'candidates'>('roles');
   const [entries, setEntries] = useState<Array<{
     event_date: string;
-    event_type: string;
+    event_type?: string;
     candidate_name: string;
     role_title: string;
     role_code?: string;
@@ -27,6 +29,12 @@ export default function RecruiterLedger() {
     interview_level?: string;
     cv_match_percent?: string;
     notes?: string;
+    role_level?: string;
+    recruiter_name?: string;
+    submitted_to_client?: boolean;
+    interviewed?: boolean;
+    client_rejected?: boolean;
+    deal_closed?: boolean;
   }>>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<10 | 25 | 50 | 100>(25);
@@ -78,15 +86,20 @@ export default function RecruiterLedger() {
       params.append('start_date', startDate);
       params.append('end_date', endDate);
     }
-    if (eventType !== 'all') params.append('event_type', eventType);
-    if (statusFilter !== 'all') params.append('status', statusFilter);
+    if (viewMode === 'candidates') {
+      if (eventType !== 'all') params.append('event_type', eventType);
+      if (statusFilter !== 'all') params.append('status', statusFilter);
+    } else {
+      if (roleLevel !== 'all') params.append('role_level', roleLevel);
+      if (outcome !== 'all') params.append('outcome', outcome);
+    }
     if (search.trim()) params.append('search', search.trim());
-    params.append('view', viewMode);
     const pg = targetPage ?? page;
     const ps = targetPageSize ?? pageSize;
     params.append('page', String(pg));
     params.append('page_size', String(ps));
-    const res = await fetchWithAuth(`/api/recruiter/ledger?${params.toString()}`);
+    const endpoint = viewMode === 'roles' ? '/api/recruiter/ledger/role-centric' : '/api/recruiter/ledger';
+    const res = await fetchWithAuth(`${endpoint}?${params.toString()}`);
     if (res.ok) {
       const data = await res.json();
       setEntries(data.events || []);
@@ -101,7 +114,7 @@ export default function RecruiterLedger() {
   useEffect(() => {
     setPage(1);
     fetchLedger(1, pageSize);
-  }, [dateRange, startDate, endDate, eventType, statusFilter, search, viewMode]);
+  }, [dateRange, startDate, endDate, eventType, statusFilter, roleLevel, outcome, search, viewMode]);
   useEffect(() => {
     fetchLedger(page, pageSize);
   }, [page, pageSize]);
@@ -136,7 +149,7 @@ export default function RecruiterLedger() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input
@@ -156,34 +169,64 @@ export default function RecruiterLedger() {
             <option value="roles">View: Roles</option>
             <option value="candidates">View: Candidates</option>
           </select>
-          <select
-            value={eventType}
-            onChange={(e) => setEventType(e.target.value as any)}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            title="Event Type"
-          >
-            <option value="all">Event: All</option>
-            <option value="submission">Submission</option>
-            <option value="rm_evaluation">Pending Evaluation</option>
-            <option value="submitted">Submitted to AM</option>
-            <option value="client_submitted">Submitted to Client</option>
-            <option value="client_rejected">Client Rejected</option>
-            <option value="interview">Interview</option>
-            <option value="deal">Deal</option>
-            <option value="discarded">Discarded</option>
-            <option value="dropout">Dropout</option>
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            title="Status"
-          >
-            <option value="all">Status: All</option>
-            <option value="in_play">In Play</option>
-            <option value="positive">Positive</option>
-            <option value="negative">Negative</option>
-          </select>
+          {viewMode === 'candidates' ? (
+            <>
+              <select
+                value={eventType}
+                onChange={(e) => setEventType(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Event Type"
+              >
+                <option value="all">Event: All</option>
+                <option value="submission">Submission</option>
+                <option value="rm_evaluation">Pending Evaluation</option>
+                <option value="submitted">Submitted to AM</option>
+                <option value="client_submitted">Submitted to Client</option>
+                <option value="client_rejected">Client Rejected</option>
+                <option value="interview">Interview</option>
+                <option value="deal">Deal</option>
+                <option value="discarded">Discarded</option>
+                <option value="dropout">Dropout</option>
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Status"
+              >
+                <option value="all">Status: All</option>
+                <option value="in_play">In Play</option>
+                <option value="positive">Positive</option>
+                <option value="negative">Negative</option>
+              </select>
+            </>
+          ) : (
+            <>
+              <select
+                value={roleLevel}
+                onChange={(e) => setRoleLevel(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Role Level"
+              >
+                <option value="all">Level: All</option>
+                <option value="junior">Junior</option>
+                <option value="mid">Mid</option>
+                <option value="senior">Senior</option>
+              </select>
+              <select
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value as any)}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                title="Outcome"
+              >
+                <option value="all">Outcome: All</option>
+                <option value="submitted">Submitted</option>
+                <option value="interviewed">Interviewed</option>
+                <option value="rejected">Rejected</option>
+                <option value="hired">Hired</option>
+              </select>
+            </>
+          )}
           <div className="grid grid-cols-3 gap-2">
             <select
               value={dateRange}
@@ -210,6 +253,24 @@ export default function RecruiterLedger() {
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
               disabled={dateRange !== 'custom'}
             />
+          </div>
+          <div className="sm:col-span-2 lg:col-span-1">
+            <button
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 hover:bg-slate-100"
+              onClick={() => {
+                setSearch('');
+                setViewMode('roles');
+                setEventType('all');
+                setStatusFilter('all');
+                setRoleLevel('all');
+                setOutcome('all');
+                setDateRange('month');
+                setStartDate('');
+                setEndDate('');
+              }}
+            >
+              Reset Filters
+            </button>
           </div>
         </div>
       </div>
@@ -240,16 +301,89 @@ export default function RecruiterLedger() {
         </div>
         <div className="p-4">
           {tableLoading ? (
-            <div className="py-8 text-center text-slate-600">Loading...</div>
+            <div className="overflow-x-auto h-[65vh] overflow-y-auto">
+              <table className="min-w-full text-sm animate-pulse">
+                <thead>
+                  <tr className="text-left">
+                    <th className="px-3 py-2 border-b w-32">Date</th>
+                    <th className="px-3 py-2 border-b w-48">Candidate</th>
+                    <th className="px-3 py-2 border-b w-40">Event</th>
+                    <th className="px-3 py-2 border-b">Role</th>
+                    <th className="px-3 py-2 border-b hidden lg:table-cell">RoleStatus</th>
+                    <th className="px-3 py-2 border-b">Client</th>
+                    <th className="px-3 py-2 border-b hidden md:table-cell">Team</th>
+                    <th className="px-3 py-2 border-b hidden md:table-cell">SubmissionType</th>
+                    <th className="px-3 py-2 border-b hidden lg:table-cell">InterviewLevel</th>
+                    <th className="px-3 py-2 border-b hidden lg:table-cell">CVMatchPercent</th>
+                    <th className="px-3 py-2 border-b hidden xl:table-cell">Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <tr key={i} className="border-b">
+                      <td className="px-3 py-3">
+                        <div className="h-3 w-20 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="h-3 w-40 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="h-3 w-28 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="h-3 w-40 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        <div className="h-3 w-24 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="h-3 w-24 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3 hidden md:table-cell">
+                        <div className="h-3 w-24 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3 hidden md:table-cell">
+                        <div className="h-3 w-24 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        <div className="h-3 w-20 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3 hidden lg:table-cell">
+                        <div className="h-3 w-16 bg-slate-200 rounded" />
+                      </td>
+                      <td className="px-3 py-3 hidden xl:table-cell">
+                        <div className="h-3 w-48 bg-slate-200 rounded" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : entries.length === 0 ? (
             <div className="text-center py-12">
               <FileText className="w-12 h-12 text-slate-400 mx-auto mb-3" />
               <p className="text-slate-600 font-medium">No results</p>
               <p className="text-sm text-slate-500 mt-1">Adjust filters and try again</p>
+              <div className="mt-4">
+                <button
+                  className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setSearch('');
+                    setViewMode('roles');
+                    setEventType('all');
+                    setStatusFilter('all');
+                    setDateRange('month');
+                    setStartDate('');
+                    setEndDate('');
+                  }}
+                >
+                  Reset Filters
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <LedgerTable entries={entries} />
+            <div className="overflow-x-auto h-[65vh] overflow-y-auto">
+              <LedgerTable entries={entries} mode={viewMode === 'roles' ? 'role-centric' : 'classic'} />
               <div className="flex items-center justify-between mt-3">
                 <div className="text-sm text-slate-600">
                   {entries.length === 0 ? "Showing 0 of 0" : `Showing ${(page - 1) * pageSize + 1}-${(page - 1) * pageSize + entries.length} of ${total}`}

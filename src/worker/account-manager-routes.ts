@@ -115,7 +115,7 @@ app.get("/api/am/assignments", amOnly, async (c) => {
   const amUser = c.get("amUser");
 
   try {
-    const clients = await db
+    const clientsAssigned = await db
       .prepare(`
         SELECT c.* FROM clients c
         INNER JOIN client_assignments ca ON c.id = ca.client_id
@@ -124,7 +124,7 @@ app.get("/api/am/assignments", amOnly, async (c) => {
       .bind((amUser as any).id)
       .all();
 
-    const teams = await db
+    const teamsAssigned = await db
       .prepare(`
         SELECT t.* FROM app_teams t
         INNER JOIN team_assignments ta ON t.id = ta.team_id
@@ -133,9 +133,66 @@ app.get("/api/am/assignments", amOnly, async (c) => {
       .bind((amUser as any).id)
       .all();
 
+    const clientsFromRoles = await db
+      .prepare(`
+        SELECT DISTINCT c.*
+        FROM am_roles r
+        INNER JOIN clients c ON r.client_id = c.id
+        WHERE r.account_manager_id = ?
+      `)
+      .bind((amUser as any).id)
+      .all();
+
+    const teamsFromRolesPrimary = await db
+      .prepare(`
+        SELECT DISTINCT t.*
+        FROM am_roles r
+        INNER JOIN app_teams t ON r.team_id = t.id
+        WHERE r.account_manager_id = ?
+      `)
+      .bind((amUser as any).id)
+      .all();
+
+    const teamsFromRolesAdditional = await db
+      .prepare(`
+        SELECT DISTINCT t.*
+        FROM am_role_teams rt
+        INNER JOIN am_roles r ON rt.role_id = r.id
+        INNER JOIN app_teams t ON rt.team_id = t.id
+        WHERE r.account_manager_id = ?
+      `)
+      .bind((amUser as any).id)
+      .all();
+
+    const byClientId: Record<number, any> = {};
+    for (const row of clientsAssigned.results || []) {
+      const v = row as any;
+      byClientId[v.id] = v;
+    }
+    for (const row of clientsFromRoles.results || []) {
+      const v = row as any;
+      if (!byClientId[v.id]) byClientId[v.id] = v;
+    }
+    const combinedClients = Object.values(byClientId);
+
+    const byTeamId: Record<number, any> = {};
+    for (const row of teamsAssigned.results || []) {
+      const v = row as any;
+      byTeamId[v.id] = v;
+    }
+    for (const row of teamsFromRolesPrimary.results || []) {
+      const v = row as any;
+      if (!byTeamId[v.id]) byTeamId[v.id] = v;
+    }
+    for (const row of teamsFromRolesAdditional.results || []) {
+      const v = row as any;
+      if (!byTeamId[v.id]) byTeamId[v.id] = v;
+    }
+    const combinedTeams = Object.values(byTeamId);
+
     return c.json({
-      clients: clients.results || [],
-      teams: teams.results || [],
+      clients: combinedClients,
+      teams: combinedTeams,
     });
   } catch (error) {
     return c.json({ error: "Failed to fetch assignments" }, 500);

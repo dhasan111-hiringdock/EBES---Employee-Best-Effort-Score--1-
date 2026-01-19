@@ -38,13 +38,23 @@ export default function ReportBotWidget() {
       recRef.current.maxAlternatives = 3;
       recRef.current.onresult = (e: any) => {
         try {
-          let transcript = "";
+          let interim = "";
+          let finalText = "";
           for (let i = e.resultIndex; i < e.results.length; i++) {
             const r = e.results[i];
-            if (r[0] && r[0].transcript) transcript += r[0].transcript;
+            const t = r[0] && r[0].transcript ? r[0].transcript : "";
+            if (t) {
+              if (r.isFinal) finalText += t;
+              else interim += t;
+            }
           }
-          const t = transcript.trim();
-          if (t) setQuery((prev) => (prev ? `${prev} ${t}` : t));
+          const tInterim = interim.trim();
+          const tFinal = finalText.trim();
+          if (tInterim) setQuery((prev) => (prev ? `${prev} ${tInterim}` : tInterim));
+          if (tFinal) {
+            setQuery((prev) => (prev ? `${prev} ${tFinal}` : tFinal));
+            if (!loading) setTimeout(() => send(), 100);
+          }
         } catch {}
       };
       recRef.current.onstart = () => {
@@ -209,6 +219,10 @@ export default function ReportBotWidget() {
                 onPointerUp={stopSpeech}
                 onMouseDown={startSpeech}
                 onMouseUp={stopSpeech}
+                onClick={() => {
+                  if (speaking) stopSpeech();
+                  else startSpeech();
+                }}
                 disabled={!voiceSupported}
                 className={`px-2 py-1 rounded-lg border ${speaking ? "border-red-300 text-red-600 hover:bg-red-50" : "border-slate-300 text-slate-700 hover:bg-slate-50"} ${!voiceSupported ? "opacity-50 cursor-not-allowed" : ""}`}
                 title={speaking ? "Release to stop" : "Hold to speak"}

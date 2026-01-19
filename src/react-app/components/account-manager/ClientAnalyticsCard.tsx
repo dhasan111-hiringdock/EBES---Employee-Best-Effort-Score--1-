@@ -1,4 +1,5 @@
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, Target } from "lucide-react";
+import { memo } from "react";
 
 interface ClientAnalytics {
   client_id: number;
@@ -46,7 +47,7 @@ interface ClientAnalyticsCardProps {
   client: ClientAnalytics;
 }
 
-export default function ClientAnalyticsCard({ client }: ClientAnalyticsCardProps) {
+function ClientAnalyticsCard({ client }: ClientAnalyticsCardProps) {
   const healthColors = {
     "Strong Account": "bg-green-100 text-green-700 border-green-200",
     "Average Account": "bg-yellow-100 text-yellow-700 border-yellow-200",
@@ -228,3 +229,4 @@ export default function ClientAnalyticsCard({ client }: ClientAnalyticsCardProps
     </div>
   );
 }
+export default memo(ClientAnalyticsCard);

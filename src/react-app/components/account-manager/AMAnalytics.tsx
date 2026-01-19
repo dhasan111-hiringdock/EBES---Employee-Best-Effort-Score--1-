@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { 
   TrendingUp, 
   AlertTriangle, 
@@ -30,7 +30,6 @@ import ClientDetailsModal from "@/react-app/components/am/ClientDetailsModal";
 import {
   Line,
   BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -48,6 +47,7 @@ import {
   ComposedChart,
   Brush
 } from "recharts";
+import { Bar } from "recharts/es6/cartesian/Bar";
 
 interface Client {
   id: number;
@@ -381,60 +381,67 @@ export default function AMAnalytics() {
 
 
 
-  const filteredClients = analyticsData?.clients?.filter((client: any) => {
-    if (selectedClient !== "all" && client.client_id.toString() !== selectedClient) return false;
-    return true;
-  }) || [];
+  const filteredClients = useMemo(() => {
+    const clients = analyticsData?.clients || [];
+    if (!clients || clients.length === 0) return [];
+    if (selectedClient !== "all") {
+      return clients.filter((client: any) => client.client_id?.toString() === selectedClient);
+    }
+    return clients;
+  }, [analyticsData, selectedClient]);
 
   // Prepare chart data
-  const statusData = analyticsData ? [
-    { name: 'Active', value: filteredClients.reduce((sum: number, c: any) => sum + c.active_roles, 0), color: COLORS.success },
-    { name: 'Deals', value: filteredClients.reduce((sum: number, c: any) => sum + c.deal_roles, 0), color: COLORS.primary },
-    { name: 'Lost', value: filteredClients.reduce((sum: number, c: any) => sum + c.lost_roles, 0), color: COLORS.danger },
-    { name: 'On Hold', value: filteredClients.reduce((sum: number, c: any) => sum + c.on_hold_roles, 0), color: COLORS.warning },
-    { name: 'Cancelled', value: filteredClients.reduce((sum: number, c: any) => sum + c.cancelled_roles, 0), color: COLORS.purple },
-    { name: 'No Answer', value: filteredClients.reduce((sum: number, c: any) => sum + c.no_answer_roles, 0), color: COLORS.pink },
-  ].filter(d => d.value > 0) : [];
+  const statusData = useMemo(() => {
+    if (!analyticsData) return [];
+    const totals = [
+      { name: 'Active', value: filteredClients.reduce((sum: number, c: any) => sum + (c.active_roles || 0), 0), color: COLORS.success },
+      { name: 'Deals', value: filteredClients.reduce((sum: number, c: any) => sum + (c.deal_roles || 0), 0), color: COLORS.primary },
+      { name: 'Lost', value: filteredClients.reduce((sum: number, c: any) => sum + (c.lost_roles || 0), 0), color: COLORS.danger },
+      { name: 'On Hold', value: filteredClients.reduce((sum: number, c: any) => sum + (c.on_hold_roles || 0), 0), color: COLORS.warning },
+      { name: 'Cancelled', value: filteredClients.reduce((sum: number, c: any) => sum + (c.cancelled_roles || 0), 0), color: COLORS.purple },
+      { name: 'No Answer', value: filteredClients.reduce((sum: number, c: any) => sum + (c.no_answer_roles || 0), 0), color: COLORS.pink },
+    ];
+    return totals.filter((d) => d.value > 0);
+  }, [analyticsData, filteredClients]);
 
-  const interviewFunnelData = analyticsData ? [
-    { stage: 'Level 1', count: filteredClients.reduce((sum: number, c: any) => sum + c.interview_1_count, 0) },
-    { stage: 'Level 2', count: filteredClients.reduce((sum: number, c: any) => sum + c.interview_2_count, 0) },
-    { stage: 'Level 3', count: filteredClients.reduce((sum: number, c: any) => sum + c.interview_3_count, 0) },
-    { stage: 'Deals', count: filteredClients.reduce((sum: number, c: any) => sum + c.deal_roles, 0) },
-  ] : [];
+  const interviewFunnelData = useMemo(() => {
+    if (!analyticsData) return [];
+    return [
+      { stage: 'Level 1', count: filteredClients.reduce((sum: number, c: any) => sum + (c.interview_1_count || 0), 0) },
+      { stage: 'Level 2', count: filteredClients.reduce((sum: number, c: any) => sum + (c.interview_2_count || 0), 0) },
+      { stage: 'Level 3', count: filteredClients.reduce((sum: number, c: any) => sum + (c.interview_3_count || 0), 0) },
+      { stage: 'Deals', count: filteredClients.reduce((sum: number, c: any) => sum + (c.deal_roles || 0), 0) },
+    ];
+  }, [analyticsData, filteredClients]);
 
-  const topClientsData = filteredClients
-    .sort((a: any, b: any) => b.deal_roles - a.deal_roles)
-    .slice(0, 5)
-    .map((c: any) => ({
-      name: c.client_code,
-      deals: c.deal_roles,
-      interviews: c.total_interviews,
-      conversion: c.roles_to_deal_conversion
-    }));
+  const topClientsData = useMemo(() => {
+    return [...filteredClients]
+      .sort((a: any, b: any) => (b.deal_roles || 0) - (a.deal_roles || 0))
+      .slice(0, 5)
+      .map((c: any) => ({
+        name: c.client_code,
+        deals: c.deal_roles,
+        interviews: c.total_interviews,
+        conversion: c.roles_to_deal_conversion
+      }));
+  }, [filteredClients]);
 
-  const performanceRadarData = analyticsData ? [
-    {
-      metric: 'Deals',
-      value: Math.min(100, (filteredClients.reduce((sum: number, c: any) => sum + c.deal_roles, 0) / Math.max(filteredClients.reduce((sum: number, c: any) => sum + c.total_roles, 0), 1)) * 100)
-    },
-    {
-      metric: 'Interviews',
-      value: Math.min(100, (filteredClients.reduce((sum: number, c: any) => sum + c.total_interviews, 0) / Math.max(filteredClients.reduce((sum: number, c: any) => sum + c.total_roles, 0) * 3, 1)) * 100)
-    },
-    {
-      metric: 'Active Roles',
-      value: Math.min(100, (filteredClients.reduce((sum: number, c: any) => sum + c.active_roles, 0) / Math.max(filteredClients.reduce((sum: number, c: any) => sum + c.total_roles, 0), 1)) * 100)
-    },
-    {
-      metric: 'Response',
-      value: Math.min(100, 100 - ((filteredClients.reduce((sum: number, c: any) => sum + c.no_answer_roles, 0) / Math.max(filteredClients.reduce((sum: number, c: any) => sum + c.total_roles, 0), 1)) * 100))
-    },
-    {
-      metric: 'Retention',
-      value: Math.min(100, 100 - ((filteredClients.reduce((sum: number, c: any) => sum + c.lost_roles + c.cancelled_roles, 0) / Math.max(filteredClients.reduce((sum: number, c: any) => sum + c.total_roles, 0), 1)) * 100))
-    },
-  ] : [];
+  const performanceRadarData = useMemo(() => {
+    if (!analyticsData) return [];
+    const totalRoles = Math.max(filteredClients.reduce((sum: number, c: any) => sum + (c.total_roles || 0), 0), 1);
+    const deals = filteredClients.reduce((sum: number, c: any) => sum + (c.deal_roles || 0), 0);
+    const interviews = filteredClients.reduce((sum: number, c: any) => sum + (c.total_interviews || 0), 0);
+    const active = filteredClients.reduce((sum: number, c: any) => sum + (c.active_roles || 0), 0);
+    const noAnswer = filteredClients.reduce((sum: number, c: any) => sum + (c.no_answer_roles || 0), 0);
+    const lostCancelled = filteredClients.reduce((sum: number, c: any) => sum + ((c.lost_roles || 0) + (c.cancelled_roles || 0)), 0);
+    return [
+      { metric: 'Deals', value: Math.min(100, (deals / totalRoles) * 100) },
+      { metric: 'Interviews', value: Math.min(100, (interviews / Math.max(totalRoles * 3, 1)) * 100) },
+      { metric: 'Active Roles', value: Math.min(100, (active / totalRoles) * 100) },
+      { metric: 'Response', value: Math.min(100, 100 - ((noAnswer / totalRoles) * 100)) },
+      { metric: 'Retention', value: Math.min(100, 100 - ((lostCancelled / totalRoles) * 100)) },
+    ];
+  }, [analyticsData, filteredClients]);
 
   const getGrowthIndicator = (current: number, previous: number) => {
     if (previous === 0) return { icon: Minus, color: 'text-gray-400', text: 'N/A' };
@@ -453,10 +460,13 @@ export default function AMAnalytics() {
   }
 
   // Calculate totals for KPI cards
-  const totalRoles = filteredClients.reduce((sum: number, c: any) => sum + c.total_roles, 0);
-  const totalInterviews = filteredClients.reduce((sum: number, c: any) => sum + c.total_interviews, 0);
-  const totalDeals = filteredClients.reduce((sum: number, c: any) => sum + c.deal_roles, 0);
-  const avgConversion = totalRoles > 0 ? (totalDeals / totalRoles) * 100 : 0;
+  const { totalRoles, totalInterviews, totalDeals, avgConversion } = useMemo(() => {
+    const roles = filteredClients.reduce((sum: number, c: any) => sum + (c.total_roles || 0), 0);
+    const interviews = filteredClients.reduce((sum: number, c: any) => sum + (c.total_interviews || 0), 0);
+    const deals = filteredClients.reduce((sum: number, c: any) => sum + (c.deal_roles || 0), 0);
+    const conversion = roles > 0 ? (deals / roles) * 100 : 0;
+    return { totalRoles: roles, totalInterviews: interviews, totalDeals: deals, avgConversion: conversion };
+  }, [filteredClients]);
 
   return (
     <div className="space-y-6">

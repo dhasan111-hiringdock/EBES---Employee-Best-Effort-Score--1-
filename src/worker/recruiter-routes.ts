@@ -58,12 +58,51 @@ app.get("/api/recruiter/clients", recruiterOnly, async (c) => {
       .bind((recruiterUser as any).id)
       .all();
 
+    const teamRoleClients = await db
+      .prepare(`
+        SELECT DISTINCT c.*, t.id as team_id, t.name as team_name, t.team_code
+        FROM recruiter_team_assignments rta
+        INNER JOIN am_roles r ON rta.team_id = r.team_id
+        INNER JOIN clients c ON r.client_id = c.id
+        INNER JOIN app_teams t ON r.team_id = t.id
+        WHERE rta.recruiter_user_id = ? AND c.is_active = 1 AND r.status = 'active'
+        ORDER BY r.created_at DESC
+      `)
+      .bind((recruiterUser as any).id)
+      .all();
+
+    const teamRoleClientsAdditional = await db
+      .prepare(`
+        SELECT DISTINCT c.*, t.id as team_id, t.name as team_name, t.team_code
+        FROM recruiter_team_assignments rta
+        INNER JOIN am_role_teams rt ON rta.team_id = rt.team_id
+        INNER JOIN am_roles r ON rt.role_id = r.id
+        INNER JOIN clients c ON r.client_id = c.id
+        INNER JOIN app_teams t ON rt.team_id = t.id
+        WHERE rta.recruiter_user_id = ? AND c.is_active = 1 AND r.status = 'active'
+        ORDER BY r.created_at DESC
+      `)
+      .bind((recruiterUser as any).id)
+      .all();
+
     const byClient: Record<number, any> = {};
     for (const row of assignments.results || []) {
       const v = row as any;
       byClient[v.id] = v;
     }
     for (const row of roleClients.results || []) {
+      const v = row as any;
+      if (!byClient[v.id]) {
+        byClient[v.id] = v;
+      }
+    }
+    for (const row of teamRoleClients.results || []) {
+      const v = row as any;
+      if (!byClient[v.id]) {
+        byClient[v.id] = v;
+      }
+    }
+    for (const row of teamRoleClientsAdditional.results || []) {
       const v = row as any;
       if (!byClient[v.id]) {
         byClient[v.id] = v;
@@ -899,7 +938,7 @@ app.get("/api/recruiter/deal-roles", recruiterOnly, async (c) => {
       params.push(parseInt(teamIdParam));
     } else {
       const assignedTeams = await db
-        .prepare(`SELECT team_id FROM team_assignments WHERE user_id = ?`)
+        .prepare(`SELECT team_id FROM recruiter_team_assignments WHERE recruiter_user_id = ?`)
         .bind((recruiterUser as any).id)
         .all();
       const teamIds = (assignedTeams.results || []).map((row: any) => (row as any).team_id);
@@ -2279,6 +2318,7 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
   const searchQuery = c.req.query("search");
   const clientId = c.req.query("client_id");
   const teamId = c.req.query("team_id");
+  const status = c.req.query("status");
 
   try {
     let query = `
@@ -2289,6 +2329,9 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
         u.name as account_manager_name,
         COUNT(DISTINCT CASE WHEN rs.entry_type = 'submission' THEN rs.id END) as total_submissions,
         COUNT(DISTINCT CASE WHEN rs.entry_type = 'interview' THEN rs.id END) as total_interviews,
+        COUNT(DISTINCT CASE WHEN rs.entry_type = 'interview' AND rs.interview_level = 1 THEN rs.id END) as interview_1_count,
+        COUNT(DISTINCT CASE WHEN rs.entry_type = 'interview' AND rs.interview_level = 2 THEN rs.id END) as interview_2_count,
+        COUNT(DISTINCT CASE WHEN rs.entry_type = 'interview' AND rs.interview_level = 3 THEN rs.id END) as interview_3_count,
         COUNT(DISTINCT CASE WHEN rs.entry_type = 'deal' THEN rs.id END) as total_deals,
         COUNT(DISTINCT CASE WHEN cra.is_discarded = 0 THEN cra.candidate_id END) as total_candidates,
         COUNT(DISTINCT CASE WHEN cra.is_discarded = 0 THEN cra.candidate_id END) as active_candidates,
@@ -2296,6 +2339,14 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
         COUNT(DISTINCT CASE WHEN rs.entry_type = 'submission' AND cra.is_discarded = 0 THEN cra.candidate_id END) as in_play_submissions,
         SUM(CASE WHEN cra.status = 'client_submitted' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_submitted,
         SUM(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM dropout_requests dr
+          WHERE dr.role_id = r.id AND dr.recruiter_user_id = ? AND dr.final_status = 'pending'
+        ) THEN 1 ELSE 0 END as has_pending_dropout,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM dropout_requests dr2
+          WHERE dr2.role_id = r.id AND dr2.recruiter_user_id = ? AND dr2.final_status = 'completed'
+        ) THEN 1 ELSE 0 END as has_dropout,
         CAST(julianday('now') - julianday(r.created_at) AS INTEGER) as days_open,
         (
           SELECT CAST(julianday(MIN(rs2.submission_date)) - julianday(r.created_at) AS INTEGER)
@@ -2316,10 +2367,26 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
       WHERE 1=1
     `;
 
-    const params: any[] = [(recruiterUser as any).id, (recruiterUser as any).id];
+    const params: any[] = [
+      (recruiterUser as any).id, // has_pending_dropout subquery
+      (recruiterUser as any).id, // has_dropout subquery
+      (recruiterUser as any).id, // recruiter_submissions join
+      (recruiterUser as any).id  // candidate_role_associations join
+    ];
 
-    if (isActive !== undefined) {
-      if (isActive === '1') {
+    if (status) {
+      if (status === "all") {
+        // no-op
+      } else if (status === "active") {
+        query += ` AND r.status = 'active'`;
+      } else if (status === "non-active") {
+        query += ` AND r.status != 'active'`;
+      } else if (["lost", "deal", "on_hold", "cancelled", "no_answer"].includes(String(status))) {
+        query += ` AND r.status = ?`;
+        params.push(String(status));
+      }
+    } else if (isActive !== undefined) {
+      if (isActive === "1") {
         query += ` AND r.status = 'active'`;
       } else {
         query += ` AND r.status != 'active'`;
@@ -2339,6 +2406,20 @@ app.get("/api/recruiter/roles-list", recruiterOnly, async (c) => {
     if (teamId) {
       query += ` AND r.team_id = ?`;
       params.push(parseInt(String(teamId)));
+    } else {
+      const assignedTeams = await db
+        .prepare(`SELECT team_id FROM recruiter_team_assignments WHERE recruiter_user_id = ?`)
+        .bind((recruiterUser as any).id)
+        .all();
+      const teamIds = (assignedTeams.results || []).map((row: any) => (row as any).team_id);
+      if (teamIds.length > 0) {
+        const placeholders = teamIds.map(() => "?").join(",");
+        query += ` AND (r.team_id IN (${placeholders}) OR EXISTS (SELECT 1 FROM role_recruiter_assignments ra WHERE ra.role_id = r.id AND ra.recruiter_user_id = ?))`;
+        params.push(...teamIds, (recruiterUser as any).id);
+      } else {
+        query += ` AND EXISTS (SELECT 1 FROM role_recruiter_assignments ra WHERE ra.role_id = r.id AND ra.recruiter_user_id = ?)`;
+        params.push((recruiterUser as any).id);
+      }
     }
 
     query += ` GROUP BY r.id ORDER BY r.created_at DESC`;
@@ -3305,6 +3386,129 @@ app.get("/api/recruiter/ledger", recruiterOnly, async (c) => {
   } catch (error: any) {
     console.error("Ledger read failed:", error);
     return c.json({ error: "Failed to read ledger" }, 500);
+  }
+});
+
+app.get("/api/recruiter/ledger/role-centric", recruiterOnly, async (c) => {
+  try {
+    const db = c.env.DB;
+    const recruiterUser = c.get("recruiterUser");
+    const dateRange = c.req.query("date_range") || "month";
+    const startDateParam = c.req.query("start_date");
+    const endDateParam = c.req.query("end_date");
+    const searchParam = c.req.query("search");
+    const roleLevelParam = c.req.query("role_level");
+    const outcomeParam = c.req.query("outcome");
+    const sortByParam = c.req.query("sort_by");
+    const sortOrderParam = c.req.query("sort_order") || "desc";
+    const pageParam = c.req.query("page");
+    const pageSizeParam = c.req.query("page_size");
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let startDate = todayStr;
+    let endDate = todayStr;
+    if (dateRange === "custom" && startDateParam && endDateParam) {
+      startDate = startDateParam;
+      endDate = endDateParam;
+    } else if (dateRange === "week") {
+      const start = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+      startDate = start;
+      endDate = todayStr;
+    } else if (dateRange === "month") {
+      const start = new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+      startDate = start;
+      endDate = todayStr;
+    } else if (dateRange === "today") {
+      startDate = todayStr;
+      endDate = todayStr;
+    }
+    const allowedSortBy = ["event_date", "candidate_name", "role_title", "client_name", "team_name", "recruiter_name"];
+    const sortBy = sortByParam && allowedSortBy.includes(String(sortByParam)) ? String(sortByParam) : "event_date";
+    const sortDesc = String(sortOrderParam).toLowerCase() !== "asc";
+    const page = Math.max(1, parseInt(String(pageParam || "1"), 10));
+    const pageSize = Math.max(1, parseInt(String(pageSizeParam || "25"), 10));
+    const search = searchParam ? `%${String(searchParam).trim()}%` : null;
+    const roleLevel = roleLevelParam ? String(roleLevelParam).toLowerCase() : null;
+    let where = "cra.recruiter_user_id = ? AND DATE(COALESCE(cra.updated_at, cra.submission_date, cra.discarded_at)) BETWEEN ? AND ?";
+    const params: any[] = [(recruiterUser as any).id, startDate, endDate];
+    if (roleLevel && ["junior", "mid", "senior"].includes(roleLevel)) {
+      where += " AND r.role_level = ?";
+      params.push(roleLevel);
+    }
+    if (search) {
+      where += " AND (c.name LIKE ? OR r.title LIKE ? OR r.role_code LIKE ? OR cl.name LIKE ? OR t.name LIKE ? OR u.name LIKE ?)";
+      params.push(search, search, search, search, search, search);
+    }
+    const rows = await db
+      .prepare(
+        `
+        SELECT 
+          DATE(MAX(COALESCE(rs.submission_date, cra.updated_at, cra.submission_date, cra.discarded_at))) as event_date,
+          c.name as candidate_name,
+          r.title as role_title,
+          r.role_code as role_code,
+          r.role_level as role_level,
+          cl.name as client_name,
+          t.name as team_name,
+          u.name as recruiter_name,
+          MAX(CASE WHEN cra.status IN ('client_submitted','client_rejected','deal') AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as submitted_to_client,
+          MAX(CASE WHEN cra.status = 'client_rejected' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as client_rejected,
+          MAX(CASE WHEN cra.status = 'deal' AND cra.is_discarded = 0 THEN 1 ELSE 0 END) as deal_closed,
+          SUM(CASE WHEN rs.entry_type = 'interview' THEN 1 ELSE 0 END) as interview_count
+        FROM candidate_role_associations cra
+        INNER JOIN candidates c ON c.id = cra.candidate_id
+        INNER JOIN am_roles r ON r.id = cra.role_id
+        INNER JOIN clients cl ON cl.id = r.client_id
+        INNER JOIN app_teams t ON t.id = r.team_id
+        INNER JOIN users u ON u.id = cra.recruiter_user_id
+        LEFT JOIN recruiter_submissions rs 
+          ON rs.role_id = r.id AND (rs.candidate_id = c.id OR rs.candidate_name = c.name)
+        WHERE ${where}
+        GROUP BY cra.role_id, cra.candidate_id
+        `
+      )
+      .bind(...params)
+      .all();
+    let results = (rows.results || []).map((r: any) => ({
+      event_date: (r as any).event_date,
+      candidate_name: (r as any).candidate_name || "",
+      role_title: (r as any).role_title || "",
+      role_code: (r as any).role_code || "",
+      role_level: (r as any).role_level || "",
+      client_name: (r as any).client_name || "",
+      team_name: (r as any).team_name || "",
+      recruiter_name: (r as any).recruiter_name || "",
+      submitted_to_client: Number((r as any).submitted_to_client || 0) > 0,
+      interviewed: Number((r as any).interview_count || 0) > 0,
+      client_rejected: Number((r as any).client_rejected || 0) > 0,
+      deal_closed: Number((r as any).deal_closed || 0) > 0
+    }));
+    const outcome = outcomeParam ? String(outcomeParam) : null;
+    if (outcome === "submitted") {
+      results = results.filter((e: any) => e.submitted_to_client);
+    } else if (outcome === "interviewed") {
+      results = results.filter((e: any) => e.interviewed);
+    } else if (outcome === "rejected") {
+      results = results.filter((e: any) => e.client_rejected);
+    } else if (outcome === "hired") {
+      results = results.filter((e: any) => e.deal_closed);
+    }
+    results.sort((a: any, b: any) => {
+      const av = (a as any)[sortBy] || "";
+      const bv = (b as any)[sortBy] || "";
+      if (sortBy === "event_date") {
+        const at = new Date(av).getTime();
+        const bt = new Date(bv).getTime();
+        return sortDesc ? bt - at : at - bt;
+      }
+      const cmp = String(av).localeCompare(String(bv));
+      return sortDesc ? -cmp : cmp;
+    });
+    const total = results.length;
+    const start = (page - 1) * pageSize;
+    const paged = results.slice(start, start + pageSize);
+    return c.json({ events: paged, total });
+  } catch (error: any) {
+    return c.json({ error: "Failed to read role-centric ledger" }, 500);
   }
 });
 

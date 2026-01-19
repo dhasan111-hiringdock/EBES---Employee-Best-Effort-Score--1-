@@ -95,6 +95,10 @@ export default function Pipeline({ clientId, teamId }: PipelineProps) {
         const res = await fetchWithAuth(`/api/am/roles?${params}`);
         if (!res.ok) return;
         const rolesData: Role[] = await res.json();
+        console.log("AMPipeline roles payload", Array.isArray(rolesData) ? rolesData.length : null, Array.isArray(rolesData) ? rolesData.slice(0,1) : rolesData);
+        if (Array.isArray(rolesData) && rolesData.length === 0) {
+          console.warn("AMPipeline empty roles", { selectedStatus, selectedClientId, selectedTeamId });
+        }
         setRoles(rolesData);
 
         const results = await Promise.all(

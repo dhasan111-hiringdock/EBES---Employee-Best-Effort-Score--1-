@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { TrendingUp, Target, Award, BarChart3, Users, Filter, X, Clock, HelpCircle, Lightbulb, CheckCircle, Download } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, PieChart, Pie, Cell } from 'recharts';
+import { Bar } from 'recharts/es6/cartesian/Bar';
 import { fetchWithAuth } from "@/react-app/utils/api";
 import ReportDownloadModal, { type ReportFilters } from "@/react-app/components/admin/ReportDownloadModal";
 import ScoreTooltip from '@/react-app/components/shared/ScoreTooltip';

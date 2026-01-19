@@ -1790,7 +1790,7 @@ app.post("/api/admin/test/seed-bot-data", adminOnly, async (c) => {
       INSERT INTO am_roles (client_id, team_id, account_manager_id, title, description, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const statuses = ["active", "on_hold", "deal", "dropout"];
+    const statuses = ["active", "on_hold", "deal", "lost"];
     const titles = ["Senior Engineer", "Junior Engineer", "Team Lead", "Product Manager", "Designer"];
     let insertedRoles = 0;
     for (let i = 0; i < titles.length; i++) {

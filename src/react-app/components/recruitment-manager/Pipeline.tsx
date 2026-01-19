@@ -69,7 +69,7 @@ export default function Pipeline() {
   };
 
   const statusChipLabel = (row: RoleSubmission) => {
-    if (row.is_discarded === 1) return "Discarded";
+    if (row.is_discarded === 1) return "Rejected";
     if (row.association_status === "client_submitted") return "Submitted to Client";
     if (row.association_status === "client_rejected") return "Client Rejected";
     if (row.association_status === "deal") return "Deal";
@@ -87,6 +87,10 @@ export default function Pipeline() {
         const res = await fetchWithAuth(`/api/rm/roles?${params.toString()}`);
         if (!res.ok) return;
         const rolesData: Role[] = await res.json();
+        console.log("RMPipeline roles payload", Array.isArray(rolesData) ? rolesData.length : null, Array.isArray(rolesData) ? rolesData.slice(0,1) : rolesData);
+        if (Array.isArray(rolesData) && rolesData.length === 0) {
+          console.warn("RMPipeline empty roles", { selectedStatus, selectedClientId, selectedTeamId });
+        }
         setRoles(rolesData);
 
         const results = await Promise.all(
@@ -421,7 +425,7 @@ export default function Pipeline() {
                       In Pipe: {bucket.under_consideration.length}
                     </span>
                     <span className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-1">
-                      Discarded: {bucket.rejected.length}
+                      Rejected: {bucket.rejected.length}
                     </span>
                     <button
                       onClick={() => exportRoleRows(role.id, role.role_code)}
@@ -433,139 +437,6 @@ export default function Pipeline() {
                     </button>
                   </div>
                 </div>
-
-                {bucket.pending_evaluation.length > 0 && (
-                  <div className="p-4 overflow-x-auto">
-                    <div className="flex items-center gap-2 mb-3">
-                      <CheckCircle className="w-4 h-4 text-indigo-600" />
-                      <span className="text-sm font-semibold text-gray-700">Pending Evaluation</span>
-                    </div>
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-gray-200 bg-gray-50">
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Candidate</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Validation</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Payment</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Review Date</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Location</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Contract Type</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Score (0–5)</th>
-                          <th className="text-left py-2 px-3 text-xs font-semibold text-gray-700">Notes</th>
-                          <th className="text-right py-2 px-3 text-xs font-semibold text-gray-700">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bucket.pending_evaluation.map((row) => (
-                          <tr id={`assoc-${row.association_id}`} key={row.association_id} className="border-b border-gray-100 hover:bg-gray-50">
-                            <td className="py-2 px-3">
-                              <div className="font-medium text-gray-900">{row.candidate_name || "Unknown"}</div>
-                              <div className="text-xs text-gray-500">{row.recruiter_name} · {row.recruiter_code}</div>
-                            </td>
-                            <td className="py-2 px-3">
-                              <input
-                                type="text"
-                                placeholder="Validation status"
-                                defaultValue={row.rm_validation_status || ''}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_validation_status: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                                disabled={!row.submission_id}
-                              />
-                            </td>
-                            <td className="py-2 px-3">
-                              <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
-                                <input
-                                  type="number"
-                                  placeholder="Payment"
-                                  defaultValue={row.rm_rate_bill !== undefined ? Number(row.rm_rate_bill) : undefined}
-                                  onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || 0)]: { ...(prev[row.submission_id || 0] || {}), rm_payment: Number(e.target.value) } }))}
-                                  className="pl-7 pr-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                                  disabled={!row.submission_id}
-                                />
-                                {(() => {
-                                  const wt = (rmEdits[row.submission_id || 0]?.rm_work_type || row.rm_work_type || '').toLowerCase();
-                                  const unit = wt === 'payroll' ? 'annually' : wt === 'sow' ? 'per day' : '';
-                                  return unit ? <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">{unit}</span> : null;
-                                })()}
-                              </div>
-                            </td>
-                            <td className="py-2 px-3">
-                              <input
-                                type="date"
-                                defaultValue={new Date().toISOString().split('T')[0]}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_review_date: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                              />
-                            </td>
-                            <td className="py-2 px-3">
-                              <input
-                                type="text"
-                                placeholder="Location"
-                                defaultValue={row.rm_location || ''}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_location: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                              />
-                            </td>
-                            <td className="py-2 px-3">
-                              <select
-                                defaultValue={row.rm_work_type || ''}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_work_type: e.target.value } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                              >
-                                <option value="">Contract Type</option>
-                                <option value="SOW">SOW</option>
-                                <option value="Payroll">Payroll</option>
-                              </select>
-                            </td>
-                            <td className="py-2 px-3">
-                              <input
-                                type="number"
-                                step="0.01"
-                                min={0}
-                                max={5}
-                                placeholder="Validation score (0–5)"
-                                defaultValue={row.score != null ? Number(row.score) : undefined}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_score_0_5: Number(e.target.value) } }))}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-full"
-                              />
-                            </td>
-                            <td className="py-2 px-3">
-                              <textarea
-                                placeholder="Notes"
-                                defaultValue={(rmEdits[(row.submission_id || row.association_id)!] as any)?.rm_notes || ''}
-                                onChange={(e) => setRmEdits((prev) => ({ ...prev, [(row.submission_id || row.association_id)!]: { ...(prev[(row.submission_id || row.association_id)!] || {}), rm_notes: e.target.value } }))}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                                rows={2}
-                              />
-                            </td>
-                            <td className="py-2 px-3 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => saveRmReview(row.submission_id, role.id, row.candidate_id!, row.association_id)}
-                                  className="px-3 py-2 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={() => sendToAM(role.id, row.candidate_id!, row.submission_id, row.association_id)}
-                                  className="px-3 py-2 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                                >
-                                  Send to AM
-                                </button>
-                                <button
-                                  onClick={() => setNoteDialog({ roleId: role.id, candidateId: row.candidate_id!, submissionId: row.submission_id })}
-                                  className="px-3 py-2 text-xs text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-                                >
-                                  Discard
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
                 <div className="p-4 overflow-x-auto max-h-[420px] overflow-y-auto relative">
                   <table className="w-full">
                     <thead>

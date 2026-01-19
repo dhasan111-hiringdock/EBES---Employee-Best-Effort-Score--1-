@@ -25,6 +25,7 @@ export function getApiBase(): string {
 }
 const requestCache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_DURATION = 5000; // 5 seconds cache for GET requests
+let lastUserId: string | undefined;
 
 export async function fetchWithAuth(url: string, options?: RequestInit): Promise<Response> {
   const user = localStorage.getItem('user');
@@ -43,6 +44,11 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
   } catch (error) {
     localStorage.removeItem('user');
     throw new Error('Invalid session');
+  }
+
+  if (userId !== lastUserId) {
+    requestCache.clear();
+    lastUserId = userId;
   }
 
   const headers = {
@@ -67,7 +73,7 @@ export async function fetchWithAuth(url: string, options?: RequestInit): Promise
   }
   
   if (method === 'GET') {
-    const cacheKey = `${method}:${fullUrl}`;
+    const cacheKey = `${method}:${fullUrl}:uid:${userId}`;
     const cached = requestCache.get(cacheKey);
     
     // Check if cache exists and is still valid
